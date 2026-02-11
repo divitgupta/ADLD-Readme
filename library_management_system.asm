@@ -1,7 +1,7 @@
-.model small ; Set memory model to small
-.stack 100h  ; Allocate 256 bytes for stack
+.model small                           ; Set memory model to small
+.stack 100h                            ; Allocate 256 bytes for stack
 
-.data ; Data segment starts here
+.data                                  ; Data segment starts here
 
 ; SYSTEM MESSAGES
 msg_welcome db 0Dh,0Ah,'===== LIBRARY MANAGEMENT SYSTEM =====$' ; Welcome message string
@@ -160,124 +160,280 @@ selected_book_idx db 0                  ; Index of book being processed
 msg_press_enter db 0Dh,0Ah,'Press Enter to continue...$'      ; Continuation prompt
 msg_approve_reject db 0Dh,0Ah,'(A)pprove/(R)eject: $'          ; Approval Choice prompt
 
-.code ; Code segment starts here
+; FILE I/O SETTINGS
+log_filename db 'LOG.CSV', 0           ; relative path
+fhandle      dw ?                      ; handle storage
+comma_char   db ','                    ; csv separator
+newline_char db 0Dh, 0Ah               ; row terminator
+csv_header   db 'User ID,Email,Book Name,Book ID,Days', 0Dh, 0Ah ; csv header
+days_val     db '7'                    ; days value
+
+.code                                  ; Code segment starts here
 
 ; UTILITY PROCEDURES
 
-; Procedure: print_string
-; Displays a '$' terminated string from DX
-print_string proc
-    push ax                             ; Preserve AX register
-    mov ah, 09h                         ; DOS: Print string function
-    int 21h                             ; Call DOS interrupt
-    pop ax                              ; Restore AX register
-    ret                                 ; Return to caller
-print_string endp
+print_string proc                      ; print string function
+    push ax                             ; save AX
+    mov ah, 09h                         ; DOS output func
+    int 21h                             ; display string
+    pop ax                              ; restore AX
+    ret                                 ; return
+print_string endp                      ; end proc
 
-; Procedure: print_newline
-; Prints carriage return and line feed
-print_newline proc
-    push ax                             ; Preserve AX register
-    push dx                             ; Preserve DX register
-    mov dl, 0Dh                         ; Carriage return character
-    mov ah, 02h                         ; DOS: Display character function
-    int 21h                             ; Call DOS interrupt
-    mov dl, 0Ah                         ; Line feed character
-    mov ah, 02h                         ; DOS: Display character function
-    int 21h                             ; Call DOS interrupt
-    pop dx                              ; Restore DX register
-    pop ax                              ; Restore AX register
-    ret                                 ; Return to caller
-print_newline endp
+print_newline proc                     ; print newline function
+    push ax                             ; save AX
+    push dx                             ; save DX
+    mov dl, 0Dh                         ; load CR
+    mov ah, 02h                         ; display char
+    int 21h                             ; DOS call
+    mov dl, 0Ah                         ; load LF
+    mov ah, 02h                         ; display char
+    int 21h                             ; DOS call
+    pop dx                              ; restore DX
+    pop ax                              ; restore AX
+    ret                                 ; return
+print_newline endp                     ; end proc
 
-; Procedure: show_digit
-; Displays a single digit (0-9) passed in AL
-show_digit proc
-    push ax                             ; Preserve AX register
-    push dx                             ; Preserve DX register
-    add al, '0'                         ; Convert digit to ASCII
-    mov dl, al                          ; Move ASCII char to DL
-    mov ah, 02h                         ; DOS: Display character function
-    int 21h                             ; Call DOS interrupt
-    pop dx                              ; Restore DX register
-    pop ax                              ; Restore AX register
-    ret                                 ; Return to caller
-show_digit endp
+show_digit proc                        ; show digit function
+    push ax                             ; save AX
+    push dx                             ; save DX
+    add al, '0'                         ; convert to char
+    mov dl, al                          ; move to output
+    mov ah, 02h                         ; display char
+    int 21h                             ; DOS call
+    pop dx                              ; restore DX
+    pop ax                              ; restore AX
+    ret                                 ; return
+show_digit endp                        ; end proc
 
-; Procedure: show_number
-; Displays a two-digit number passed in AL
-show_number proc
-    push ax                             ; Preserve AX register
-    push bx                             ; Preserve BX register
-    push dx                             ; Preserve DX register
-    mov bl, 10                          ; Divisor to separate digits
-    xor ah, ah                          ; Clear AH for division
-    div bl                              ; AL = quotient (tens), AH = remainder (units)
-    push ax                             ; Save remainder
-    call show_digit                      ; Display tens digit
-    pop ax                              ; Restore remainder
-    mov al, ah                          ; Move remainder to AL
-    call show_digit                      ; Display units digit
-    pop dx                              ; Restore DX register
-    pop bx                              ; Restore BX register
-    pop ax                              ; Restore AX register
-    ret                                 ; Return to caller
-show_number endp
+show_number proc                       ; show number function
+    push ax                             ; save AX
+    push bx                             ; save BX
+    push dx                             ; save DX
+    mov bl, 10                          ; set divisor
+    xor ah, ah                          ; clean high
+    div bl                              ; divide AX
+    push ax                             ; save remainder
+    call show_digit                     ; show tens
+    pop ax                              ; restore remainder
+    mov al, ah                          ; load units
+    call show_digit                     ; show units
+    pop dx                              ; restore DX
+    pop bx                              ; restore BX
+    pop ax                              ; restore AX
+    ret                                 ; return
+show_number endp                       ; end proc
 
-; Procedure: print_spaces
-; Prints CX number of spaces
-print_spaces proc
-    push ax                             ; Preserve AX register
-    push dx                             ; Preserve DX register
-    push cx                             ; Preserve CX register
-space_loop:
-    mov dl, ' '                         ; Space character
-    mov ah, 02h                         ; DOS: Display character function
-    int 21h                             ; Call DOS interrupt
-    loop space_loop                     ; Repeat CX times
-    pop cx                              ; Restore CX register
-    pop dx                              ; Restore DX register
-    pop ax                              ; Restore AX register
-    ret                                 ; Return to caller
-print_spaces endp
+print_spaces proc                      ; print spaces function
+    push ax                             ; save AX
+    push dx                             ; save DX
+    push cx                             ; save count
+space_loop:                             ; repeat loop
+    mov dl, ' '                         ; load space
+    mov ah, 02h                         ; display char
+    int 21h                             ; DOS call
+    loop space_loop                     ; repeat CX
+    pop cx                              ; restore count
+    pop dx                              ; restore DX
+    pop ax                              ; restore AX
+    ret                                 ; return
+print_spaces endp                      ; end proc
 
-; Procedure: read_char
-; Reads a character from keyboard with echo
-read_char proc
-    mov ah, 01h                         ; DOS: Read char with echo function
-    int 21h                             ; Call DOS interrupt
-    ret                                 ; Return with char in AL
-read_char endp
+read_char proc                         ; read char function
+    mov ah, 01h                         ; read with echo
+    int 21h                             ; DOS call
+    ret                                 ; return result
+read_char endp                         ; end proc
 
-; Procedure: wait_for_enter
-; Blocks until Enter key (0Dh) is pressed
-wait_for_enter proc
-    push ax                             ; Preserve AX register
-wait_enter_loop:
-    mov ah, 01h                         ; DOS: Read char with echo function
-    int 21h                             ; Call DOS interrupt
-    cmp al, 0Dh                         ; Check if char is Carriage Return
-    jne wait_enter_loop                 ; If not, wait again
-    pop ax                              ; Restore AX register
-    ret                                 ; Return to caller
-wait_for_enter endp
+wait_for_enter proc                    ; wait enter function
+    push ax                             ; save AX
+wait_enter_loop:                        ; waiting loop
+    mov ah, 01h                         ; read with echo
+    int 21h                             ; DOS call
+    cmp al, 0Dh                         ; check CR
+    jne wait_enter_loop                 ; repeat if not
+    pop ax                              ; restore AX
+    ret                                 ; return
+wait_for_enter endp                    ; end proc
 
-; Procedure: flush_buffer
-; Clears all pending keyboard input
-flush_buffer proc
-    push ax                             ; Preserve AX register
-flush_loop:
-    mov ah, 0Bh                         ; DOS: Check input status function
-    int 21h                             ; Call DOS interrupt
-    cmp al, 0                           ; AL = 0 means no char available
-    je flush_done                       ; Finish if buffer empty
-    mov ah, 01h                         ; DOS: Read char (to consume it)
-    int 21h                             ; Call DOS interrupt
-    jmp flush_loop                      ; Check for next char
-flush_done:
-    pop ax                              ; Restore AX register
-    ret                                 ; Return to caller
-flush_buffer endp
+flush_buffer proc                      ; flush buffer function
+    push ax                             ; save AX
+flush_loop:                             ; check loop
+    mov ah, 0Bh                         ; check status
+    int 21h                             ; DOS call
+    cmp al, 0                           ; any keys?
+    je flush_done                       ; done if zero
+    mov ah, 01h                         ; read key
+    int 21h                             ; consume key
+    jmp flush_loop                      ; check again
+flush_done:                             ; finished
+    pop ax                              ; restore AX
+    ret                                 ; return
+flush_buffer endp                      ; end proc
+
+log_transaction proc                   ; function start
+    push ax                             ; save AX
+    push bx                             ; save BX
+    push cx                             ; save CX
+    push dx                             ; save DX
+    push si                             ; save SI
+    push di                             ; save DI
+
+    mov ah, 43h                         ; attribute check
+    mov al, 00h                         ; get mode
+    lea dx, log_filename                ; load name
+    int 21h                             ; DOS call
+    jc create_new_log                   ; jump if missing
+
+    mov ah, 3Dh                         ; open existing
+    mov al, 2                           ; rw mode
+    lea dx, log_filename                ; load name
+    int 21h                             ; DOS call
+    jnc open_log_success                ; handle success
+    jmp log_done                        ; exit if fail
+
+create_new_log:                         ; file setup
+    mov ah, 3Ch                         ; create new
+    xor cx, cx                          ; normal type
+    lea dx, log_filename                ; load name
+    int 21h                             ; DOS call
+    jc log_done                         ; exit on fail
+    
+    mov fhandle, ax                     ; save handle
+    
+    mov ah, 40h                         ; write data
+    mov bx, fhandle                     ; load handle
+    mov cx, 38                          ; header size
+    lea dx, csv_header                  ; load header
+    int 21h                             ; DOS call
+    jmp open_log_success_no_seek        ; skip seeking
+    
+open_log_success:                       ; file opened
+    mov fhandle, ax                     ; save handle
+
+    mov ah, 42h                         ; move pointer
+    mov al, 2                           ; end pointer
+    mov bx, fhandle                     ; target file
+    xor cx, cx                          ; zero high
+    xor dx, dx                          ; zero low
+    int 21h                             ; DOS call
+
+open_log_success_no_seek:               ; ready to log
+    mov cl, student_count               ; load count
+    xor ch, ch                          ; clean high
+    xor si, si                          ; reset index
+    mov temp_idx, 0                     ; default index
+find_log_stud:                          ; search loop
+    jcxz start_log_writing              ; check empty
+    push cx                             ; save counter
+    
+    mov ax, si                          ; get index
+    mov bx, 5                           ; id size
+    mul bx                              ; get offset
+    lea di, student_ids                 ; load table
+    add di, ax                          ; target cell
+    push si                             ; save index
+    lea si, uid_in                      ; load input
+    mov cx, 5                           ; id length
+    repe cmpsb                          ; compare strings
+    pop si                              ; restore index
+    pop cx                              ; restore counter
+    je found_log_stud                   ; check match
+    
+    inc si                              ; next record
+    loop find_log_stud                  ; repeat search
+    jmp start_log_writing               ; finish search
+
+found_log_stud:                         ; user located
+    mov ax, si                          ; load index
+    mov temp_idx, al                    ; store result
+
+start_log_writing:                      ; data commit
+    mov ah, 40h                         ; write function
+    mov bx, fhandle                     ; target file
+    mov cx, 5                           ; id size
+    lea dx, uid_in                      ; id source
+    int 21h                             ; DOS call
+
+    mov ah, 40h                         ; write function
+    mov cx, 1                           ; size one
+    lea dx, comma_char                  ; delimiter
+    int 21h                             ; DOS call
+    
+    mov al, temp_idx                    ; load index
+    xor ah, ah                          ; clean high
+    mov bx, 30                          ; email size
+    mul bx                              ; get offset
+    lea dx, student_emails              ; load table
+    add dx, ax                          ; address calculated
+    mov ah, 40h                         ; write function
+    mov bx, fhandle                     ; target file
+    mov cx, 30                          ; data size
+    int 21h                             ; write email
+    
+    mov ah, 40h                         ; write function
+    mov bx, fhandle                     ; target file
+    mov cx, 1                           ; size one
+    lea dx, comma_char                  ; delimiter
+    int 21h                             ; DOS call
+    
+    mov al, selected_book_idx           ; load book
+    mov bl, 15                          ; name size
+    mul bl                              ; get offset
+    lea dx, book_names                  ; load table
+    add dx, ax                          ; address calculated
+    mov ah, 40h                         ; write function
+    mov bx, fhandle                     ; target file
+    mov cx, 15                          ; data size
+    int 21h                             ; write name
+    
+    mov ah, 40h                         ; write function
+    mov bx, fhandle                     ; target file
+    mov cx, 1                           ; size one
+    lea dx, comma_char                  ; delimiter
+    int 21h                             ; DOS call
+
+    mov al, selected_book_idx           ; current book
+    inc al                              ; adjust index
+    add al, '0'                         ; convert char
+    mov temp_byte, al                   ; save temp
+    mov ah, 40h                         ; write function
+    mov bx, fhandle                     ; target file
+    mov cx, 1                           ; size one
+    lea dx, temp_byte                   ; char source
+    int 21h                             ; DOS call
+    
+    mov ah, 40h                         ; write function
+    mov bx, fhandle                     ; target file
+    mov cx, 1                           ; size one
+    lea dx, comma_char                  ; delimiter
+    int 21h                             ; DOS call
+    
+    mov ah, 40h                         ; write function
+    mov bx, fhandle                     ; target file
+    mov cx, 1                           ; size one
+    lea dx, days_val                    ; constant source
+    int 21h                             ; DOS call
+
+    mov ah, 40h                         ; write function
+    mov bx, fhandle                     ; target file
+    mov cx, 2                           ; newline size
+    lea dx, newline_char                ; row terminator
+    int 21h                             ; DOS call
+
+    mov ah, 3Eh                         ; close file
+    mov bx, fhandle                     ; source file
+    int 21h                             ; exit handle
+
+log_done:                               ; finish up
+    pop di                              ; restore registers
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret                                 ; return
+log_transaction endp                   ; end proc
 
 ; Procedure: consume_enter
 ; Consumes a trailing Enter key if present in buffer
@@ -314,429 +470,400 @@ encrypt_loop:
     loop encrypt_loop                   ; Process CX characters
     
     pop si                              ; Restore SI pointer
-    pop bx                              ; Restore BX register
-    pop cx                              ; Restore CX register
-    ret                                 ; Return to caller
-encrypt_password endp
+    pop bx                              ; restore BX
+    pop cx                              ; restore CX
+    ret                                 ; return
+encrypt_password endp                  ; end proc
 
-; MAIN PROGRAM
-main proc
-    mov ax, @data                       ; Load data segment address
-    mov ds, ax                          ; Set DS register
-    mov es, ax                          ; Set ES register
 
-; Main Menu Loop - Display login/signup options
-main_menu:
-    lea dx, msg_welcome                 ; Load welcome message
-    call print_string                    ; Display message
-    
-    lea dx, msg_main                    ; Load main menu options
-    call print_string                    ; Display options
-    
-    call read_char                       ; Read user choice
-    call wait_for_enter                  ; Wait for confirmation
-    
-    cmp al, '1'                         ; Check if choice is 1
-    je start_login                      ; Go to login
-    cmp al, '2'                         ; Check if choice is 2
-    je start_signup                     ; Go to signup
-    cmp al, '3'                         ; Check if choice is 3
-    je exit_program                     ; Terminate program
-    
-    jmp main_menu                       ; Repeat menu if invalid
-main endp
+main proc                              ; entry point
+    mov ax, @data                       ; load data segment
+    mov ds, ax                          ; set DS
+    mov es, ax                          ; set ES
 
-; SIGNUP SYSTEM
-start_signup:
-    ; Check if signup queue is full
-    mov al, request_count               ; Get current request count
-    cmp al, MAX_REQUESTS                ; Compare with maximum
-    jge signup_queue_full               ; Error if queue full
+main_menu:                              ; splash screen
+    lea dx, msg_welcome                ; load welcome
+    call print_string                   ; display it
     
-    lea dx, msg_signup                  ; Load signup header
-    call print_string                    ; Display header
+    lea dx, msg_main                   ; load options
+    call print_string                   ; display them
     
-    ; Read User ID
-    lea dx, msg_newuid                  ; Load ID prompt
-    call print_string                    ; Display prompt
+    call read_char                      ; read selection
+    call wait_for_enter                 ; wait enter
     
-    lea si, uid_in                      ; Point SI to ID buffer
-    mov cx, 5                           ; Set length to 5
-read_signup_uid:
-    call read_char                       ; Read character
-    cmp al, 0Dh                         ; Check if Enter pressed
-    je pad_uid_signup                   ; Go to padding if Enter
-    mov [si], al                        ; Store character in buffer
-    inc si                              ; Move to next position
-    loop read_signup_uid                ; Repeat for 5 chars
-    jmp check_uid_exists_label          ; Continue to validation
+    cmp al, '1'                         ; check choice 1
+    je start_login                      ; go to login
+    cmp al, '2'                         ; check choice 2
+    je start_signup                     ; go to signup
+    cmp al, '3'                         ; check choice 3
+    je exit_program                     ; close program
     
-pad_uid_signup:
-    ; Fill remaining characters with spaces
-    mov al, ' '                         ; Load space character
-pad_uid_loop_signup:
-    mov [si], al                        ; Store space in buffer
-    inc si                              ; Move to next position
-    loop pad_uid_loop_signup            ; Repeat until 5 chars
-    call print_newline                  ; Print newline
-    
-check_uid_exists_label:
-    ; Validate: Check if user ID already exists
-    call check_uid_exists               ; Internal database check
-    cmp al, 1                           ; Check result
-    je uid_exists_error                 ; Error if exists
-    
-    ; Validate: Check if user ID already pending
-    call check_uid_in_requests          ; Pending queue check
-    cmp al, 1                           ; Check result
-    je uid_exists_error                 ; Error if exists
-    
-    ; Read Email Address (30 characters)
-    lea dx, msg_email                   ; Load email prompt
-    call print_string                    ; Display prompt
-    
-    lea si, email_in                    ; Point SI to email buffer
-    mov cx, 30                          ; Set length to 30
-read_email:
-    call read_char                       ; Read character
-    cmp al, 0Dh                         ; Check if Enter pressed
-    je pad_email                        ; Go to padding if Enter
-    mov [si], al                        ; Store character in buffer
-    inc si                              ; Move to next position
-    loop read_email                     ; Repeat for 30 chars
-    jmp read_name_section               ; Continue
-    
-pad_email:
-    ; Fill remaining characters with spaces
-    mov al, ' '                         ; Load space character
-pad_email_loop:
-    mov [si], al                        ; Store space in buffer
-    inc si                              ; Move to next position
-    loop pad_email_loop                 ; Repeat until 30 chars
-    call print_newline                  ; Print newline
-    
-read_name_section:
-    ; Read Full Name
-    lea dx, msg_name                    ; Load name prompt
-    call print_string                    ; Display prompt
-    
-    lea si, name_in                     ; Point SI to name buffer
-    mov cx, 10                          ; Set length to 10
-read_name:
-    call read_char                       ; Read character
-    cmp al, 0Dh                         ; Check if Enter pressed
-    je pad_name                         ; Go to padding if Enter
-    mov [si], al                        ; Store character in buffer
-    inc si                              ; Move to next position
-    loop read_name                      ; Repeat for 10 chars
-    jmp read_password_section           ; Continue
-    
-pad_name:
-    ; Fill remaining characters with spaces
-    mov al, ' '                         ; Load space character
-pad_name_loop:
-    mov [si], al                        ; Store space in buffer
-    inc si                              ; Move to next position
-    loop pad_name_loop                  ; Repeat until 10 chars
-    call print_newline                  ; Print newline
-    
-read_password_section:
-    ; Read Password (with masking)
-    lea dx, msg_newpwd                  ; Load password prompt
-    call print_string                    ; Display prompt
-    
-    lea si, pwd_in                      ; Point SI to password buffer
-    mov cx, 5                           ; Set length to 5
-read_signup_pwd:
-    call read_char                       ; Read character
-    cmp al, 0Dh                         ; Check if Enter pressed
-    je pad_signup_pwd                   ; Go to padding if Enter
-    mov [si], al                        ; Store character in buffer
-    push dx                             ; Save DX
-    mov dl, 08h                         ; Backspace character
-    mov ah, 02h                         ; Display char
-    int 21h                             ; Echo backspace
-    mov dl, '*'                         ; Mask character
-    int 21h                             ; Echo mask
-    pop dx                              ; Restore DX
-    inc si                              ; Move to next position
-    loop read_signup_pwd                ; Repeat for 5 chars
-    jmp read_confirm_section            ; Continue
-    
-pad_signup_pwd:
-    mov al, ' '                         ; Load space character
-pad_signup_pwd_loop:
-    mov [si], al                        ; Store space in buffer
-    inc si                              ; Move to next position
-    loop pad_signup_pwd_loop            ; Repeat until 5 chars
-    call print_newline                  ; Print newline
+    jmp main_menu                       ; loop back
+main endp                              ; end proc
 
-read_confirm_section:
-    ; Confirm Password (with masking)
-    lea dx, msg_confirm                 ; Load confirm prompt
-    call print_string                    ; Display prompt
+start_signup:                           ; registration start
+    mov al, request_count               ; load count
+    cmp al, MAX_REQUESTS                ; check limit
+    jge signup_queue_full               ; handle full
     
-    lea si, pwd_confirm                  ; Point SI to confirm buffer
-    mov cx, 5                           ; Set length to 5
-read_confirm_pwd:
-    call read_char                       ; Read character
-    cmp al, 0Dh                         ; Check if Enter pressed
-    je pad_confirm_pwd                   ; Go to padding if Enter
-    mov [si], al                        ; Store character in buffer
-    push dx                             ; Save DX
-    mov dl, 08h                         ; Backspace character
-    mov ah, 02h                         ; Display char
-    int 21h                             ; Echo backspace
-    mov dl, '*'                         ; Mask character
-    int 21h                             ; Echo mask
-    pop dx                              ; Restore DX
-    inc si                              ; Move to next position
-    loop read_confirm_pwd               ; Repeat for 5 chars
-    jmp validate_passwords              ; Continue
+    lea dx, msg_signup                 ; load header
+    call print_string                   ; display it
     
-pad_confirm_pwd:
-    mov al, ' '                         ; Load space character
-pad_confirm_pwd_loop:
-    mov [si], al                        ; Store space in buffer
-    inc si                              ; Move to next position
-    loop pad_confirm_pwd_loop            ; Repeat until 5 chars
-    call print_newline                  ; Print newline
+    lea dx, msg_newuid                 ; load prompt
+    call print_string                   ; display it
     
-validate_passwords:
-    ; Validate: Compare passwords
-    lea si, pwd_in                      ; Point SI to password
-    lea di, pwd_confirm                  ; Point DI to confirmation
-    mov cx, 5                           ; Set comparison length
-    repe cmpsb                          ; Compare strings
-    jne password_mismatch               ; Error if mismatch
+    lea si, uid_in                      ; target buffer
+    mov cx, 5                           ; set length
+read_signup_uid:                        ; input loop
+    call read_char                      ; read key
+    cmp al, 0Dh                         ; check Enter
+    je pad_uid_signup                   ; handle padding
+    mov [si], al                        ; save char
+    inc si                              ; next pos
+    loop read_signup_uid                ; repeat 5x
+    jmp check_uid_exists_label          ; move to check
     
-    ; Save signup request data
+pad_uid_signup:                         ; ID alignment
+    mov al, ' '                         ; load space
+pad_uid_loop_signup:                    ; padding loop
+    mov [si], al                        ; save space
+    inc si                              ; next pos
+    loop pad_uid_loop_signup            ; repeat CX
+    call print_newline                  ; format output
     
-    ; Copy User ID to request queue
-    mov al, request_count               ; Get request index
-    xor ah, ah                          ; Clear AH
-    mov bx, 5                           ; ID length
-    mul bx                              ; Offset = index * 5
-    lea di, request_ids                 ; Destination
-    add di, ax                          ; Add offset
-    lea si, uid_in                      ; Source
-    mov cx, 5                           ; Length
-    rep movsb                           ; Copy ID
+check_uid_exists_label:                 ; validation check
+    call check_uid_exists               ; check database
+    cmp al, 1                           ; check match
+    je uid_exists_error                 ; handle error
     
-    ; Copy and encrypt password
-    push si                             ; Save SI
-    push cx                             ; Save CX
-    lea si, pwd_in                      ; Point to input password
-    mov cx, 5                           ; Length
-    call encrypt_password               ; Encrypt in place
-    pop cx                              ; Restore CX
-    pop si                              ; Restore SI
+    call check_uid_in_requests          ; check queue
+    cmp al, 1                           ; check match
+    je uid_exists_error                 ; handle error
     
-    mov al, request_count               ; Get request index
-    xor ah, ah                          ; Clear AH
-    mov bx, 5                           ; PWD length
-    mul bx                              ; Offset = index * 5
-    lea di, request_pwds                ; Destination
-    add di, ax                          ; Add offset
-    lea si, pwd_in                      ; Source (now encrypted)
-    mov cx, 5                           ; Length
-    rep movsb                           ; Copy password
+    lea dx, msg_email                  ; load prompt
+    call print_string                   ; display it
     
-    ; Decrypt back to plain text for session consistency
-    push si                             ; Save SI
-    push cx                             ; Save CX
-    lea si, pwd_in                      ; Point to password
-    mov cx, 5                           ; Length
-    call encrypt_password               ; XOR again to decrypt
-    pop cx                              ; Restore CX
-    pop si                              ; Restore SI
+    lea si, email_in                    ; target buffer
+    mov cx, 30                          ; set length
+read_email:                             ; input loop
+    call read_char                      ; read key
+    cmp al, 0Dh                         ; check Enter
+    je pad_email                        ; handle padding
+    mov [si], al                        ; save char
+    inc si                              ; next pos
+    loop read_email                     ; repeat 30x
+    jmp read_name_section               ; move to name
     
-    ; Copy Email to request queue (30 characters)
-    mov al, request_count               ; Get request index
-    xor ah, ah                          ; Clear AH
-    mov bx, 30                          ; Email length
-    mul bx                              ; Offset = index * 30
-    lea di, request_emails               ; Destination
-    add di, ax                          ; Add offset
-    lea si, email_in                    ; Source
-    mov cx, 30                          ; Length
-    rep movsb                           ; Copy email
+pad_email:                              ; Email alignment
+    mov al, ' '                         ; load space
+pad_email_loop:                         ; padding loop
+    mov [si], al                        ; save space
+    inc si                              ; next pos
+    loop pad_email_loop                 ; repeat CX
+    call print_newline                  ; format output
     
-    ; Copy Name to request queue
-    mov al, request_count               ; Get request index
-    xor ah, ah                          ; Clear AH
-    mov bx, 10                          ; Name length
-    mul bx                              ; Offset = index * 10
-    lea di, request_names               ; Destination
-    add di, ax                          ; Add offset
-    lea si, name_in                     ; Source
-    mov cx, 10                          ; Length
-    rep movsb                           ; Copy name
+read_name_section:                      ; get username
+    lea dx, msg_name                   ; load prompt
+    call print_string                   ; display it
     
-    inc request_count                   ; Increment pending request count
+    lea si, name_in                     ; target buffer
+    mov cx, 10                          ; set length
+read_name:                              ; input loop
+    call read_char                      ; read key
+    cmp al, 0Dh                         ; check Enter
+    je pad_name                         ; handle padding
+    mov [si], al                        ; save char
+    inc si                              ; next pos
+    loop read_name                      ; repeat 10x
+    jmp read_password_section           ; move to pwd
     
-    lea dx, msg_reqsent                 ; Load Success message
-    call print_string                    ; Display message
-    lea dx, msg_press_enter              ; Load prompt
-    call print_string                    ; Display prompt
-    call wait_for_enter                  ; Wait for Enter
-    jmp main_menu                       ; Return to main menu
+pad_name:                               ; Name alignment
+    mov al, ' '                         ; load space
+pad_name_loop:                          ; padding loop
+    mov [si], al                        ; save space
+    inc si                              ; next pos
+    loop pad_name_loop                  ; repeat CX
+    call print_newline                  ; format output
     
-signup_queue_full:
-    lea dx, msg_reqfull                 ; Load full error
-    call print_string                    ; Display message
-    lea dx, msg_press_enter              ; Load prompt
-    call print_string                    ; Display prompt
-    call wait_for_enter                  ; Wait for Enter
-    jmp main_menu                       ; Return to main menu
+read_password_section:                  ; get password
+    lea dx, msg_newpwd                 ; load prompt
+    call print_string                   ; display it
     
-uid_exists_error:
-    lea dx, msg_exists                  ; Load exists error
-    call print_string                    ; Display message
-    lea dx, msg_press_enter              ; Load prompt
-    call print_string                    ; Display prompt
-    call wait_for_enter                  ; Wait for Enter
-    jmp main_menu                       ; Return to main menu
+    lea si, pwd_in                      ; target buffer
+    mov cx, 5                           ; set length
+read_signup_pwd:                        ; input loop
+    call read_char                      ; read key
+    cmp al, 0Dh                         ; check Enter
+    je pad_signup_pwd                   ; handle padding
+    mov [si], al                        ; save char
+    push dx                             ; save DX
+    mov dl, 08h                         ; backspace
+    mov ah, 02h                         ; output func
+    int 21h                             ; DOS call
+    mov dl, '*'                         ; mask char
+    int 21h                             ; DOS call
+    pop dx                              ; restore DX
+    inc si                              ; next pos
+    loop read_signup_pwd                ; repeat 5x
+    jmp read_confirm_section            ; move to confirm
     
-password_mismatch:
-    lea dx, msg_pwdmis                  ; Load mismatch error
-    call print_string                    ; Display message
-    lea dx, msg_press_enter              ; Load prompt
-    call print_string                    ; Display prompt
-    call wait_for_enter                  ; Wait for Enter
-    jmp main_menu                       ; Return to main menu
+pad_signup_pwd:                         ; PWD alignment
+    mov al, ' '                         ; load space
+pad_signup_pwd_loop:                    ; padding loop
+    mov [si], al                        ; save space
+    inc si                              ; next pos
+    loop pad_signup_pwd_loop            ; repeat CX
+    call print_newline                  ; format output
 
-; LOGIN SYSTEM
-start_login:
-    mov attempts, 3                     ; Set maximum login attempts to 3
+read_confirm_section:                    ; verify password
+    lea dx, msg_confirm                ; load prompt
+    call print_string                   ; display it
     
-login_screen:
-    ; Read User ID
-    lea dx, msg_uid                    ; Load User ID prompt
-    call print_string                   ; Display prompt
+    lea si, pwd_confirm                 ; target buffer
+    mov cx, 5                           ; set length
+read_confirm_pwd:                       ; input loop
+    call read_char                      ; read key
+    cmp al, 0Dh                         ; check Enter
+    je pad_confirm_pwd                  ; handle padding
+    mov [si], al                        ; save char
+    push dx                             ; save DX
+    mov dl, 08h                         ; backspace
+    mov ah, 02h                         ; output func
+    int 21h                             ; DOS call
+    mov dl, '*'                         ; mask char
+    int 21h                             ; DOS call
+    pop dx                              ; restore DX
+    inc si                              ; next pos
+    loop read_confirm_pwd               ; repeat 5x
+    jmp validate_passwords              ; move to check
     
-    lea si, uid_in                     ; Point SI to ID buffer
-    mov cx, 5                          ; Set length to 5
-read_uid:
-    call read_char                      ; Read character
-    cmp al, 0Dh                        ; Check if Enter pressed
-    je pad_uid_login                   ; If Enter, pad ID with spaces
-    mov [si], al                       ; Store character
-    inc si                             ; Advance pointer
-    loop read_uid                      ; Repeat for 5 characters
-    jmp read_password_login            ; Proceed to password
+pad_confirm_pwd:                        ; Confirm alignment
+    mov al, ' '                         ; load space
+pad_confirm_pwd_loop:                   ; padding loop
+    mov [si], al                        ; save space
+    inc si                              ; next pos
+    loop pad_confirm_pwd_loop           ; repeat CX
+    call print_newline                  ; format output
     
-pad_uid_login:
-    ; Fill remaining characters with spaces
-    mov al, ' '                        ; Load space character
-pad_uid_loop_login:
-    mov [si], al                       ; Store space
-    inc si                             ; Advance pointer
-    loop pad_uid_loop_login            ; Repeat until 5 chars
-    call print_newline                 ; Print newline after entry
+validate_passwords:                     ; match check
+    lea si, pwd_in                      ; load pwd
+    lea di, pwd_confirm                 ; load confirm
+    mov cx, 5                           ; set length
+    repe cmpsb                          ; compare strings
+    jne password_mismatch               ; check match
     
-read_password_login:
-    ; Read Password (with masking)
-    lea dx, msg_pwd                    ; Load password prompt
-    call print_string                   ; Display prompt
+    mov al, request_count               ; load index
+    xor ah, ah                          ; clean high
+    mov bx, 5                           ; id size
+    mul bx                              ; get offset
+    lea di, request_ids                 ; find table
+    add di, ax                          ; target cell
+    lea si, uid_in                      ; source data
+    mov cx, 5                           ; length 5
+    rep movsb                           ; copy ID
     
-    lea si, pwd_in                     ; Point SI to password buffer
-    mov cx, 5                          ; Set length to 5
-read_pwd:
-    call read_char                      ; Read character
-    cmp al, 0Dh                        ; Check if Enter pressed
-    je pad_pwd_login                   ; If Enter, pad password
-    mov [si], al                       ; Store character
-    push dx                            ; Save DX register
-    mov dl, 08h                        ; Backspace character
-    mov ah, 02h                        ; Display char function
-    int 21h                            ; Move cursor back
-    mov dl, '*'                        ; Mask character
-    int 21h                            ; Display mask
-    pop dx                             ; Restore DX register
-    inc si                             ; Advance pointer
-    loop read_pwd                      ; Repeat for 5 characters
-    jmp start_admin_check              ; Proceed to authentication
+    push si                             ; backup SI
+    push cx                             ; backup CX
+    lea si, pwd_in                      ; target pwd
+    mov cx, 5                           ; set length
+    call encrypt_password               ; secure it
+    pop cx                              ; restore CX
+    pop si                              ; restore SI
     
-pad_pwd_login:
-    mov al, ' '                        ; Load space character
-pad_pwd_login_loop:
-    mov [si], al                       ; Store space
-    inc si                             ; Advance pointer
-    loop pad_pwd_login_loop            ; Repeat until 5 chars
-    call print_newline                 ; Print newline after entry
+    mov al, request_count               ; load index
+    xor ah, ah                          ; clean high
+    mov bx, 5                           ; pwd size
+    mul bx                              ; get offset
+    lea di, request_pwds                ; find table
+    add di, ax                          ; target cell
+    lea si, pwd_in                      ; source data
+    mov cx, 5                           ; length 5
+    rep movsb                           ; copy PWD
+    
+    push si                             ; backup SI
+    push cx                             ; backup CX
+    lea si, pwd_in                      ; restore buffer
+    mov cx, 5                           ; set length
+    call encrypt_password               ; decrypt it
+    pop cx                              ; restore CX
+    pop si                              ; restore SI
+    
+    mov al, request_count               ; load index
+    xor ah, ah                          ; clean high
+    mov bx, 30                          ; email size
+    mul bx                              ; get offset
+    lea di, request_emails              ; find table
+    add di, ax                          ; target cell
+    lea si, email_in                    ; source data
+    mov cx, 30                          ; length 30
+    rep movsb                           ; copy email
+    
+    mov al, request_count               ; load index
+    xor ah, ah                          ; clean high
+    mov bx, 10                          ; name size
+    mul bx                               ; get offset
+    lea di, request_names                ; find table
+    add di, ax                           ; target cell
+    lea si, name_in                      ; source data
+    mov cx, 10                           ; length 10
+    rep movsb                            ; copy name
+    
+    inc request_count                   ; add request
+    
+    lea dx, msg_reqsent                 ; load success
+    call print_string                    ; display it
+    lea dx, msg_press_enter              ; load prompt
+    call print_string                    ; display it
+    call wait_for_enter                  ; wait enter
+    jmp main_menu                       ; back to main
+    
+signup_queue_full:                      ; capacity error
+    lea dx, msg_reqfull                 ; load error
+    call print_string                    ; display it
+    lea dx, msg_press_enter              ; load prompt
+    call print_string                    ; display it
+    call wait_for_enter                  ; wait enter
+    jmp main_menu                       ; back to main
+    
+uid_exists_error:                       ; duplicate error
+    lea dx, msg_exists                  ; load error
+    call print_string                    ; display it
+    lea dx, msg_press_enter              ; load prompt
+    call print_string                    ; display it
+    call wait_for_enter                  ; wait enter
+    jmp main_menu                       ; back to main
+    
+password_mismatch:                      ; typing error
+    lea dx, msg_pwdmis                  ; load error
+    call print_string                    ; display it
+    lea dx, msg_press_enter              ; load prompt
+    call print_string                    ; display it
+    call wait_for_enter                  ; wait enter
+    jmp main_menu                       ; back to main
 
-start_admin_check:
-    ; Check Admin Login
-    lea si, uid_in                     ; Point to entered ID
-    lea di, admin_id                    ; Point to admin ID
-    mov cx, 5                          ; Set comparison length
-    repe cmpsb                         ; Compare strings
-    jne try_student                    ; If not admin, check student
+start_login:                            ; login setup
+    mov attempts, 3                     ; reset counter
     
-    lea si, pwd_in                     ; Point to entered password
-    lea di, admin_pwd                   ; Point to admin password
-    mov cx, 5                          ; Set comparison length
-    repe cmpsb                         ; Compare strings
-    jne login_failed                   ; If wrong password, fail
+login_screen:                           ; retry loop
+    lea dx, msg_uid                    ; load prompt
+    call print_string                   ; display it
     
-    mov user_role, 1                   ; Set role to Admin (1)
-    lea dx, msg_ok                     ; Load success message
-    call print_string                   ; Display message
+    lea si, uid_in                      ; target buffer
+    mov cx, 5                           ; set length
+read_uid:                               ; input loop
+    call read_char                      ; read key
+    cmp al, 0Dh                         ; check Enter
+    je pad_uid_login                    ; handle padding
+    mov [si], al                        ; save char
+    inc si                              ; next pos
+    loop read_uid                       ; repeat 5x
+    jmp read_password_login             ; move to pwd
     
-    ; Save current user ID
-    lea si, uid_in                     ; Point to input ID
-    lea di, current_uid                 ; Point to session storage
-    mov cx, 5                          ; Length 5
-    rep movsb                          ; Copy ID to session
+pad_uid_login:                          ; ID alignment
+    mov al, ' '                         ; load space
+pad_uid_loop_login:                     ; padding loop
+    mov [si], al                        ; save space
+    inc si                              ; next pos
+    loop pad_uid_loop_login             ; repeat CX
+    call print_newline                  ; format output
     
-    jmp admin_main                     ; Redirect to Admin Menu
+read_password_login:                    ; get password
+    lea dx, msg_pwd                    ; load prompt
+    call print_string                   ; display it
     
-; Check Student Login
-try_student:
-    call find_student_login            ; Search student database
-    cmp al, 0FFh                       ; Check if not found
-    je login_failed                    ; If not found, fail
-    cmp al, 0FEh                       ; Check if pending approval
-    je login_pending                   ; If pending, notify
+    lea si, pwd_in                      ; target buffer
+    mov cx, 5                           ; set length
+read_pwd:                               ; input loop
+    call read_char                      ; read key
+    cmp al, 0Dh                         ; check Enter
+    je pad_pwd_login                    ; handle padding
+    mov [si], al                        ; save char
+    push dx                             ; backup DX
+    mov dl, 08h                         ; backspace
+    mov ah, 02h                         ; display char
+    int 21h                             ; DOS call
+    mov dl, '*'                         ; mask char
+    int 21h                             ; DOS call
+    pop dx                              ; restore DX
+    inc si                              ; next pos
+    loop read_pwd                       ; repeat 5x
+    jmp start_admin_check               ; move to auth
     
-    mov user_role, 2                   ; Set role to Student (2)
-    lea dx, msg_ok                     ; Load success message
-    call print_string                   ; Display message
+pad_pwd_login:                          ; PWD alignment
+    mov al, ' '                         ; load space
+pad_pwd_login_loop:                     ; padding loop
+    mov [si], al                        ; save space
+    inc si                              ; next pos
+    loop pad_pwd_login_loop             ; repeat CX
+    call print_newline                  ; format output
+
+start_admin_check:                      ; system check
+    lea si, uid_in                      ; load input
+    lea di, admin_id                    ; load admin
+    mov cx, 5                           ; set length
+    repe cmpsb                          ; compare strings
+    jne try_student                     ; check student
     
-    ; Save current user ID
-    lea si, uid_in                     ; Point to input ID
-    lea di, current_uid                 ; Point to session storage
-    mov cx, 5                          ; Length 5
-    rep movsb                          ; Copy ID to session
+    lea si, pwd_in                      ; load input
+    lea di, admin_pwd                   ; load admin
+    mov cx, 5                           ; set length
+    repe cmpsb                          ; compare strings
+    jne login_failed                    ; check match
     
-    jmp student_main                   ; Redirect to Student Menu
+    mov user_role, 1                    ; set admin
+    lea dx, msg_ok                      ; load success
+    call print_string                   ; display it
     
-login_pending:
-    lea dx, msg_pending                ; Load pending notification
-    call print_string                   ; Display notification
-    lea dx, msg_press_enter             ; Load continuation prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait for Enter
-    jmp main_menu                      ; Return to main menu
+    lea si, uid_in                      ; current id
+    lea di, current_uid                 ; session id
+    mov cx, 5                           ; set length
+    rep movsb                           ; copy data
     
-login_failed:
-    dec attempts                       ; Decrement remaining attempts
-    lea dx, msg_fail                   ; Load failure message
-    call print_string                   ; Display message
-    lea dx, msg_press_enter             ; Load continuation prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait for Enter
+    jmp admin_main                      ; open admin
     
-    cmp attempts, 0                    ; Check if attempts depleted
-    jne login_screen                   ; If attempts left, retry
+try_student:                            ; db search
+    call find_student_login             ; check records
+    cmp al, 0FFh                        ; check not found
+    je login_failed                     ; handle error
+    cmp al, 0FEh                        ; check pending
+    je login_pending                    ; handle error
     
-    lea dx, msg_lock                   ; Load lockout notification
-    call print_string                   ; Display notification
-    lea dx, msg_press_enter             ; Load continuation prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait for Enter
-    jmp main_menu                      ; Return to main menu
+    mov user_role, 2                    ; set student
+    lea dx, msg_ok                      ; load success
+    call print_string                   ; display it
+    
+    lea si, uid_in                      ; current id
+    lea di, current_uid                 ; session id
+    mov cx, 5                           ; set length
+    rep movsb                           ; copy data
+    
+    jmp student_main                    ; open student
+    
+login_pending:                          ; approval status
+    lea dx, msg_pending                 ; load error
+    call print_string                   ; display it
+    lea dx, msg_press_enter             ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp main_menu                       ; back to main
+    
+login_failed:                           ; auth error
+    dec attempts                        ; reduce tries
+    lea dx, msg_fail                    ; load error
+    call print_string                   ; display it
+    lea dx, msg_press_enter             ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    
+    cmp attempts, 0                     ; check tries
+    jne login_screen                    ; retry loop
+    
+    lea dx, msg_lock                    ; load lockout
+    call print_string                   ; display it
+    lea dx, msg_press_enter             ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp main_menu                       ; back to main
 
 
 
@@ -864,148 +991,141 @@ read_target_uid:
     jmp check_target_student           ; proceed
     
 pad_target_uid:
-    mov al, ' '                        ; Space character
-pad_target_uid_loop:
-    mov [si], al                       ; Store space
-    inc si                             ; Next position
-    loop pad_target_uid_loop           ; Repeat until 5
-    call print_newline                 ; Newline
+    mov al, ' '                        ; load space
+pad_target_uid_loop:                    ; padding loop
+    mov [si], al                        ; save space
+    inc si                              ; next pos
+    loop pad_target_uid_loop            ; repeat CX
+    call print_newline                  ; format output
     
-check_target_student:
-    ; Verify student exists
-    call check_uid_exists              ; Search student IDs
-    cmp al, 0                          ; Result 0 = Not found
-    je admin_student_not_found         ; Handle missing user
+check_target_student:                   ; find user
+    call check_uid_exists               ; check database
+    cmp al, 0                           ; check not found
+    je admin_student_not_found          ; handle missing
     
-    ; Check target student's issue limit (max 4 books)
-    call count_student_issues          ; Count active issues for this user
-    cmp al, 4                          ; Compare with limit
-    jge admin_limit_reached            ; Handle limit error
+    call count_student_issues           ; check count
+    cmp al, 4                           ; limit of 4
+    jge admin_limit_reached             ; handle capped
     
-    ; Check for overdue books
-    call check_overdue_issues          ; Check if user has overdue books
-    cmp al, 1                          ; Result 1 = Blocked
-    je admin_overdue_block             ; Handle overdue error
+    call check_overdue_issues           ; check dates
+    cmp al, 1                           ; check blocked
+    je admin_overdue_block              ; handle late
     
-    ; Check if book is in stock
-    xor bh, bh                         ; Clear BH
-    mov bl, selected_book_idx          ; Load index
-    lea si, book_stock                 ; Base address
-    add si, bx                         ; Point to stock
-    cmp byte ptr [si], 0               ; Check if stock available
-    je issue_no_stock                  ; Error if empty
+    xor bh, bh                          ; clean high
+    mov bl, selected_book_idx           ; load index
+    lea si, book_stock                  ; find table
+    add si, bx                          ; target slot
+    cmp byte ptr [si], 0                ; check inventory
+    je issue_no_stock                   ; handle empty
     
-    ; Decrease stock
-    dec byte ptr [si]                  ; Decrement stock level
+    dec byte ptr [si]                   ; reduce stock
     
-    ; Record issue details
-    mov al, issue_count                ; Get current issue index
-    xor ah, ah                         ; Clean AH
-    mov temp_word, ax                  ; Store index in temp
-    mov si, temp_word                  ; SI = index
+    mov al, issue_count                 ; load index
+    xor ah, ah                          ; clean high
+    mov temp_word, ax                   ; store index
+    mov si, temp_word                   ; set pointer
     
-    ; Store book number
-    lea bx, issue_bookno               ; Base address
-    add bx, si                         ; Point to current slot
-    mov al, selected_book_idx          ; Load book index
-    inc al                             ; Convert to 1-based
-    mov [bx], al                       ; Store in issue record
+    lea bx, issue_bookno                ; find table
+    add bx, si                          ; target slot
+    mov al, selected_book_idx           ; load index
+    inc al                              ; adjust 1-based
+    mov [bx], al                        ; save book
     
-    ; Store target Student ID
-    mov ax, si                         ; index
-    mov bx, 5                          ; length
-    mul bx                             ; offset
-    lea di, issue_userid               ; Base address
-    add di, ax                         ; Point to destination
-    lea si, uid_in                     ; Source
-    mov cx, 5                          ; length
-    rep movsb                          ; copy ID
+    mov ax, si                          ; load index
+    mov bx, 5                           ; id size
+    mul bx                              ; get offset
+    lea di, issue_userid                ; find table
+    add di, ax                          ; target cell
+    lea si, uid_in                      ; source data
+    mov cx, 5                           ; length 5
+    rep movsb                           ; copy ID
     
-    ; Set deadline (7 days)
-    mov si, temp_word                  ; restore index
-    lea bx, issue_days                 ; Base address
-    add bx, si                         ; Point to current slot
-    mov byte ptr [bx], 7               ; Set initial days remaining
+    mov si, temp_word                   ; restore index
+    lea bx, issue_days                  ; find table
+    add bx, si                          ; target slot
+    mov byte ptr [bx], 7                ; set 7 days
     
-    inc issue_count                    ; Increment total issues
+    inc issue_count                     ; add issue
     
-    lea dx, msg_issued                 ; Load Success message
-    call print_string                   ; Display success
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+    call log_transaction                ; save to CSV
     
-admin_student_not_found:
-    lea dx, msg_fail                   ; Load error message
-    call print_string                   ; Display error
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+    lea dx, msg_issued                 ; load success
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
     
-issue_no_stock:
-    lea dx, msg_nostk                  ; Load out of stock message
-    call print_string                   ; Display error
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+admin_student_not_found:                ; lookup fail
+    lea dx, msg_fail                   ; load error
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
     
-admin_overdue_block:
-    lea dx, msg_overdue                ; Load overdue block message
-    call print_string                   ; Display error
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+issue_no_stock:                         ; empty shelf
+    lea dx, msg_nostk                  ; load error
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
     
-admin_limit_reached:
-    lea dx, msg_limit                  ; Load limit reached message
-    call print_string                   ; Display error
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+admin_overdue_block:                    ; penalty active
+    lea dx, msg_overdue                ; load error
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
+    
+admin_limit_reached:                    ; too many books
+    lea dx, msg_limit                  ; load error
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
 
 ; ADMIN: Return Book
-admin_return:
-    call get_book_number                ; Input validated book index
-    cmp al, 0FFh                       ; Check if invalid
-    je admin_main                      ; Return to menu if invalid
+admin_return:                          ; return process
+    call get_book_number                ; input book
+    cmp al, 0FFh                        ; check invalid
+    je admin_main                       ; back to menu
     
-    inc al                             ; Convert to 1-based number
-    mov temp_byte, al                  ; Store for search
+    inc al                              ; adjust 1-based
+    mov temp_byte, al                   ; store target
     
-    ; Prompt for Student User ID
-    lea dx, msg_target_uid             ; Load prompt
-    call print_string                   ; Display prompt
+    lea dx, msg_target_uid             ; load prompt
+    call print_string                   ; display it
     
     ; Read Student ID
-    lea si, uid_in                     ; Buffer pointer
-    mov cx, 5                          ; Length
-read_return_uid:
-    call read_char                      ; Read character
-    cmp al, 0Dh                        ; Check for Enter
-    je pad_return_uid                  ; Pad if Enter pressed
-    mov [si], al                       ; Store character
-    inc si                             ; Next position
-    loop read_return_uid               ; repeat for 5 chars
-    jmp check_return_student           ; proceed
+    lea si, uid_in                      ; target buffer
+    mov cx, 5                           ; set length
+read_return_uid:                        ; input loop
+    call read_char                      ; read key
+    cmp al, 0Dh                         ; check Enter
+    je pad_return_uid                   ; handle padding
+    mov [si], al                        ; save char
+    inc si                              ; next pos
+    loop read_return_uid                ; repeat 5x
+    jmp check_return_student            ; move to check
     
-pad_return_uid:
-    mov al, ' '                        ; Space character
-pad_return_uid_loop:
-    mov [si], al                       ; Store space
-    inc si                             ; Next position
-    loop pad_return_uid_loop           ; repeat until 5
-    call print_newline                 ; Newline
+pad_return_uid:                         ; ID alignment
+    mov al, ' '                         ; load space
+pad_return_uid_loop:                    ; padding loop
+    mov [si], al                        ; save space
+    inc si                              ; next pos
+    loop pad_return_uid_loop            ; repeat CX
+    call print_newline                  ; format output
     
-check_return_student:
+
     ; Verify student exists
-    call check_uid_exists              ; Search student IDs
-    cmp al, 0                          ; Result 0 = Not found
-    je admin_return_student_not_found  ; handle missing user
+check_return_student:                   ; find user
+    call check_uid_exists               ; check database
+    cmp al, 0                           ; check not found
+    je admin_return_student_not_found   ; handle missing
     
     ; Find the specific issue (Book + Student)
     mov cl, issue_count                ; Total active issues
@@ -1013,373 +1133,333 @@ check_return_student:
     jcxz admin_no_issue_found          ; Fail if no issues record
     xor si, si                         ; SI as counter (0-based)
     
-find_admin_return_issue:
-    push cx                             ; Save outer count
-    push si                             ; Save outer index
+find_admin_return_issue:                ; search loop
+    push cx                             ; save count
+    push si                             ; save index
     
-    ; 1. Check book number
-    lea bx, issue_bookno               ; Base address
-    add bx, si                         ; Current slot
-    mov al, [bx]                       ; Load book recorded
-    cmp al, temp_byte                  ; Compare with target book
-    jne next_return_search             ; Mismatch, try next
+    lea bx, issue_bookno                ; find table
+    add bx, si                          ; current slot
+    mov al, [bx]                        ; load stored
+    cmp al, temp_byte                   ; check book
+    jne next_return_search              ; try next
     
-    ; 2. Check user ID
-    mov ax, si                         ; index
-    mov bx, 5                          ; length
-    mul bx                             ; offset
-    lea si, issue_userid               ; Base for user records
-    add si, ax                         ; Current user entry
-    lea di, uid_in                     ; Target user entry
-    mov cx, 5                          ; length
-    repe cmpsb                         ; Compare IDs
-    je found_admin_return_issue        ; Match, proceed to return
+    mov ax, si                          ; load index
+    mov bx, 5                           ; id size
+    mul bx                              ; get offset
+    lea si, issue_userid                ; find table
+    add si, ax                          ; target cell
+    lea di, uid_in                      ; load input
+    mov cx, 5                           ; set length
+    repe cmpsb                          ; compare IDs
+    je found_admin_return_issue         ; check match
     
-next_return_search:
-    pop si                             ; Restore index
-    pop cx                             ; Restore count
-    inc si                             ; Advance index
-    loop find_admin_return_issue       ; Repeat until end of issues
-    jmp admin_no_issue_found           ; End of loop, no match found
+next_return_search:                     ; continue loop
+    pop si                              ; restore index
+    pop cx                              ; restore count
+    inc si                              ; next issue
+    loop find_admin_return_issue        ; repeat CX
+    jmp admin_no_issue_found            ; handle fail
 
-found_admin_return_issue:
-    pop si                             ; SI now contains the index to remove
-    pop cx                             ; Restore stack
-    jmp found_issue                    ; Goto processing
+found_admin_return_issue:               ; cleanup
+    pop si                              ; get slot
+    pop cx                              ; drop stack
+    jmp found_issue                     ; process it
 
-admin_return_student_not_found:
-    lea dx, msg_fail
-    call print_string
-    lea dx, msg_press_enter
-    call print_string
-    call wait_for_enter
-    jmp admin_main
+admin_return_student_not_found:         ; user fail
+    lea dx, msg_fail                   ; load error
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
     
-admin_no_issue_found:
-    lea dx, msg_nobook
-    call print_string
-    lea dx, msg_press_enter
-    call print_string
-    call wait_for_enter
-    jmp admin_main
+admin_no_issue_found:                   ; record fail
+    lea dx, msg_nobook                 ; load error
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
     
-found_issue:
-    ; Increase book stock
-    mov al, temp_byte
-    dec al
-    xor ah, ah
-    mov bx, ax
-    lea di, book_stock
-    add di, bx
-    inc byte ptr [di]
+found_issue:                           ; stock update
+    mov al, temp_byte                   ; load book
+    dec al                              ; adjust 0-based
+    xor ah, ah                          ; clean high
+    mov bx, ax                          ; set index
+    lea di, book_stock                  ; find table
+    add di, bx                          ; target slot
+    inc byte ptr [di]                   ; add to stock
     
-    ; Shift remaining issues to fill the gap
-found_issue:
-    ; Increase book stock
-    mov al, temp_byte                  ; Get book number (1-based)
-    dec al                             ; Convert to 0-based
-    xor ah, ah                         ; Clear high byte
-    mov bx, ax                         ; Move to BX for index
-    lea di, book_stock                 ; Base address
-    add di, bx                         ; Point to specific stock
-    inc byte ptr [di]                  ; Increment stock count
+    mov cl, issue_count                 ; load total
+    mov temp_word, si                   ; save slot
+    mov ax, temp_word                   ; move to reg
+    sub cl, al                          ; get trailing
+    dec cl                              ; adjust count
+    xor ch, ch                          ; clean high
     
-    ; Shift remaining issues to fill the gap
-    mov cl, issue_count                ; Total active issues
-    mov temp_word, si                  ; Store index of removed item
-    mov ax, temp_word                  ; Move to AX
-    sub cl, al                         ; Calculate items after removed item
-    dec cl                             ; Adjust for current item removal
-    xor ch, ch                         ; Clear high byte
+shift_issues:                           ; pack array
+    jcxz remove_done                    ; check end
     
-shift_issues:
-    jcxz remove_done                   ; If nothing to shift, finish
+    mov temp_word, si                   ; save slot
+    mov bx, si                          ; set index
+    inc bx                              ; next record
     
-    ; Store current destination index
-    mov temp_word, si                  ; Save SI to temp
+    push bx                             ; save source
+    lea di, issue_bookno                ; find table
+    add di, bx                          ; target slot
+    mov al, [di]                        ; load value
+    mov di, temp_word                   ; set destination
+    lea bx, issue_bookno                ; find table
+    add bx, di                          ; target slot
+    mov [bx], al                        ; save value
+    pop bx                              ; restore source
     
-    ; Source index is Destination + 1
-    mov bx, si                         ; BX = current index
-    inc bx                             ; BX = next index (source)
+    push cx                             ; save count
+    mov ax, bx                          ; source index
+    mov cx, 5                           ; id size
+    mul cx                              ; get offset
+    lea si, issue_userid                ; find table
+    add si, ax                          ; source address
     
-    ; 1. Shift book numbers
-    push bx                             ; Save source index
-    lea di, issue_bookno               ; Base address
-    add di, bx                         ; DI = source slot
-    mov al, [di]                       ; AL = source value
-    mov di, temp_word                  ; DI = dest index
-    lea bx, issue_bookno               ; Base address
-    add bx, di                         ; BX = dest slot
-    mov [bx], al                       ; Store value in dest
-    pop bx                             ; Restore source index
+    mov ax, temp_word                   ; dest index
+    mov cx, 5                           ; id size
+    mul cx                              ; get offset
+    lea di, issue_userid                ; find table
+    add di, ax                          ; dest address
     
-    ; 2. Shift user IDs (5 characters)
-    push cx                             ; Save outer loop counter
+    mov cx, 5                           ; length 5
+    rep movsb                           ; copy ID
+    pop cx                              ; restore count
     
-    ; Source address -> SI
-    mov ax, bx                         ; Source index
-    mov cx, 5                          ; length
-    mul cx                             ; offset
-    lea si, issue_userid               ; base
-    add si, ax                         ; SI = source address
+    mov bx, temp_word                   ; restore slot
+    inc bx                              ; next source
+    lea di, issue_days                  ; find table
+    add di, bx                          ; target slot
+    mov al, [di]                        ; load value
+    mov di, temp_word                   ; set destination
+    lea bx, issue_days                  ; find table
+    add bx, di                          ; target slot
+    mov [bx], al                        ; save value
     
-    ; Destination address -> DI
-    mov ax, temp_word                  ; dest index
-    mov cx, 5                          ; length
-    mul cx                             ; offset
-    lea di, issue_userid               ; base
-    add di, ax                         ; DI = destination address
+    mov si, temp_word                   ; restore slot
+    inc si                              ; next pos
+    loop shift_issues                   ; repeat CX
     
-    mov cx, 5                          ; number of bytes to copy
-    rep movsb                          ; copy User ID
+remove_done:                            ; finalize return
+    dec issue_count                     ; reduce active
     
-    pop cx                             ; Restore loop counter
-    
-    ; 3. Shift days remaining
-    mov bx, temp_word                  ; restore original dest
-    inc bx                             ; bx = source again
-    lea di, issue_days                 ; base
-    add di, bx                         ; DI = source slot
-    mov al, [di]                       ; AL = source value
-    mov di, temp_word                  ; DI = dest index
-    lea bx, issue_days                 ; base
-    add bx, di                         ; BX = dest slot
-    mov [bx], al                       ; Store in dest
-    
-    ; Next record
-    mov si, temp_word                  ; back to dest index
-    inc si                             ; SI = next record's dest
-    loop shift_issues                  ; Repeat for remaining issues
-    
-remove_done:
-    dec issue_count                    ; Decrement total active issues
-    
-    lea dx, msg_return                 ; Load Success message
-    call print_string                   ; Display success
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+    lea dx, msg_return                 ; load success
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
 
-; ADMIN: Add Stock
-admin_add_stock:
-    call get_book_number                ; Get validated book index
-    cmp al, 0FFh                       ; Check if invalid
-    je admin_main                      ; Return to menu if invalid
+admin_add_stock:                        ; replenishment
+    call get_book_number                ; input book
+    cmp al, 0FFh                        ; check invalid
+    je admin_main                       ; back to menu
     
-    mov temp_byte, al                  ; Store book index
+    mov temp_byte, al                   ; save index
     
-    ; Get quantity to add
-    lea dx, msg_qty                    ; Load quantity prompt
-    call print_string                   ; Display prompt
+    lea dx, msg_qty                    ; load prompt
+    call print_string                   ; display it
     
-    call read_char                      ; Read quantity digit
-    call wait_for_enter                 ; Wait for confirmation
-    sub al, '0'                        ; Convert ASCII to number
+    call read_char                      ; read digit
+    call wait_for_enter                 ; wait enter
+    sub al, '0'                         ; convert decimal
     
-    ; Validate against maximum stock
-    xor bh, bh                         ; Clear high byte
-    mov bl, temp_byte                  ; Load book index
+    xor bh, bh                          ; clean high
+    mov bl, temp_byte                   ; load index
     
-    push ax                             ; Save quantity to add
-    lea si, book_stock                 ; Point to stock levels
-    add si, bx                         ; Point to specific book
-    mov al, [si]                       ; Load current stock
-    mov cl, al                         ; Store in CL
-    pop ax                             ; Restore quantity to add
+    push ax                             ; save quantity
+    lea si, book_stock                  ; find table
+    add si, bx                          ; target slot
+    mov al, [si]                        ; current stock
+    mov cl, al                          ; copy for math
+    pop ax                              ; restore qty
     
-    add cl, al                         ; Calculate new potential stock
+    add cl, al                          ; get total
     
-    lea si, book_max                   ; Point to maximum capacities
-    add si, bx                         ; Point to specific limit
-    cmp cl, [si]                       ; Compare total with limit
-    jg stock_overflow                  ; Error if total exceeds max
+    lea si, book_max                    ; find limit
+    add si, bx                          ; target slot
+    cmp cl, [si]                        ; check capacity
+    jg stock_overflow                   ; handle full
     
-    ; Add to stock
-    lea si, book_stock                 ; Point to stock levels
-    add si, bx                         ; Point to specific book
-    add [si], al                       ; Added confirmed quantity
+    lea si, book_stock                  ; find table
+    add si, bx                          ; target slot
+    add [si], al                        ; update stock
     
-    lea dx, msg_added                  ; Load Success message
-    call print_string                   ; Display success
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+    lea dx, msg_added                  ; load success
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
     
-stock_overflow:
-    lea dx, msg_invalid                ; Load Overflow/Invalid message
-    call print_string                   ; Display error
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+stock_overflow:                         ; limit error
+    lea dx, msg_invalid                ; load error
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
 
-; ADMIN: Add New Book
-admin_add_book:
-    ; Check if book database is full
-    mov al, book_count                 ; Current total books
-    cmp al, MAX_BOOKS                  ; Compare with max allowed
-    jge book_db_full                   ; Error if full
+admin_add_book:                         ; database addition
+    mov al, book_count                  ; load total
+    cmp al, MAX_BOOKS                   ; check limit
+    jge book_db_full                    ; handle full
     
-    lea dx, msg_newbook                ; Load Header
-    call print_string                   ; Display header
+    lea dx, msg_newbook                ; load header
+    call print_string                   ; display it
     
-    ; Read book name
-    mov al, book_count                 ; Use current count as new index
-    xor ah, ah                         ; Clean AH
-    mov bx, 15                         ; Name slot size
-    mul bx                             ; Calculate offset
-    lea di, book_names                 ; Base address
-    add di, ax                         ; DI = destination slot
+    mov al, book_count                  ; set index
+    xor ah, ah                          ; clean high
+    mov bx, 15                          ; name size
+    mul bx                              ; get offset
+    lea di, book_names                  ; find table
+    add di, ax                          ; target slot
     
-    mov cx, 15                         ; Set input length
-read_bookname:
-    call read_char                      ; Read character
-    cmp al, 0Dh                        ; Check for Enter
-    je pad_bookname                    ; Pad if Enter pressed
-    mov [di], al                       ; Store character
-    inc di                             ; Next position
-    loop read_bookname                 ; Repeat for 15 characters
-    jmp read_stock_section              ; Proceed
+    mov cx, 15                          ; set count
+read_bookname:                          ; input loop
+    call read_char                      ; read key
+    cmp al, 0Dh                         ; check Enter
+    je pad_bookname                     ; handle padding
+    mov [di], al                        ; save char
+    inc di                              ; next pos
+    loop read_bookname                  ; repeat 15x
+    jmp read_stock_section              ; move to stock
     
-pad_bookname:
-    ; Fill remaining characters with spaces
-    mov al, ' '                        ; Space character
-pad_bookname_loop:
-    mov [di], al                       ; Store space
-    inc di                             ; Next position
-    loop pad_bookname_loop              ; Repeat until 15
-    call print_newline                  ; Newline
+pad_bookname:                           ; alignment
+    mov al, ' '                         ; load space
+pad_bookname_loop:                      ; padding loop
+    mov [di], al                        ; save space
+    inc di                              ; next pos
+    loop pad_bookname_loop               ; repeat CX
+    call print_newline                  ; format output
     
-read_stock_section:
-    ; Read initial stock
-    lea dx, msg_stock                  ; Load Stock prompt
-    call print_string                   ; Display prompt
-    call read_char                      ; Read digit
-    call wait_for_enter                 ; Wait
-    sub al, '0'                        ; Convert to number
+read_stock_section:                     ; get inventory
+    lea dx, msg_stock                  ; load prompt
+    call print_string                   ; display it
+    call read_char                      ; read digit
+    call wait_for_enter                 ; wait enter
+    sub al, '0'                         ; convert decimal
     
-    xor bh, bh                         ; clean BX
+    xor bh, bh                          ; clean high
     mov bl, book_count                  ; current index
-    lea si, book_stock                 ; stock array
-    add si, bx                         ; target slot
-    mov [si], al                       ; store value
+    lea si, book_stock                  ; find table
+    add si, bx                          ; target slot
+    mov [si], al                        ; save value
     
-    ; Read maximum stock
-    lea dx, msg_maxstk                 ; Load Max Stock prompt
-    call print_string                   ; Display prompt
-    call read_char                      ; Read digit
-    call wait_for_enter                 ; Wait
-    sub al, '0'                        ; Convert to number
+    lea dx, msg_maxstk                 ; load prompt
+    call print_string                   ; display it
+    call read_char                      ; read digit
+    call wait_for_enter                 ; wait enter
+    sub al, '0'                         ; convert decimal
     
-    lea si, book_max                   ; max array
-    add si, bx                         ; target slot
-    mov [si], al                       ; store value
+    lea si, book_max                    ; find table
+    add si, bx                          ; target slot
+    mov [si], al                        ; save value
     
-    inc book_count                     ; Increment database size
+    inc book_count                      ; add book
     
-    lea dx, msg_created                ; Load Success message
-    call print_string                   ; Display success
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+    lea dx, msg_created                ; load success
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
     
-book_db_full:
-    lea dx, msg_full                   ; Load full error
-    call print_string                   ; Display message
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+book_db_full:                           ; database limit
+    lea dx, msg_full                   ; load error
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
 
 ; ADMIN: View Issued Books
-admin_view_issued:
-    cmp issue_count, 0                 ; Any active issues?
-    je no_issues                       ; Branch if none
+admin_view_issued:                        ; active loans
+    cmp issue_count, 0                 ; check empty
+    je no_issues                       ; handle none
     
-    lea dx, hdr_issued                 ; Load Header
-    call print_string                   ; Display header
-    call print_newline                  ; Newline
+    lea dx, hdr_issued                 ; load header
+    call print_string                   ; display it
+    call print_newline                  ; format output
     
-    mov cl, issue_count                ; Total count
-    xor ch, ch                         ; clean high byte
-    xor si, si                         ; index (0-based)
+    mov cl, issue_count                ; load total
+    xor ch, ch                         ; clean high
+    xor si, si                         ; reset index
     
-view_issued_loop:
-    push cx                             ; Save counter
+view_issued_loop:                       ; display loop
+    push cx                             ; save count
     
-    ; Display issue number
-    mov ax, si                         ; index
-    inc al                             ; 1-based
-    call show_digit                     ; Display number
+    mov ax, si                          ; load index
+    inc al                              ; adjust 1-based
+    call show_digit                     ; display id
     
-    mov cx, 3                          ; 3 spaces
-    call print_spaces                   ; Display
+    mov cx, 3                           ; load spacing
+    call print_spaces                   ; format output
     
-    ; Display book name
-    lea bx, issue_bookno               ; Base array
-    add bx, si                         ; Current slot
-    mov al, [bx]                       ; Load book recorded
-    dec al                             ; Convert to 0-based index
-    push si                             ; Save current issue index
+    lea bx, issue_bookno                ; find table
+    add bx, si                          ; current slot
+    mov al, [bx]                        ; load value
+    dec al                              ; adjust index
+    push si                             ; save slot
     
-    xor ah, ah                         ; clean AX
-    mov bx, 15                         ; Slot size
-    mul bx                             ; offset
-    lea bx, book_names                 ; Base table
-    add bx, ax                         ; Point to record
-    mov cx, 15                         ; Set length
-print_issued_name:
-    mov dl, [bx]                       ; Load character
-    mov ah, 02h                        ; Display
-    int 21h                            ; Call DOS
-    inc bx                             ; Next
-    loop print_issued_name             ; Repeat 15
+    xor ah, ah                          ; clean high
+    mov bx, 15                          ; name size
+    mul bx                              ; get offset
+    lea bx, book_names                  ; find table
+    add bx, ax                          ; target name
+    mov cx, 15                          ; set length
+print_issued_name:                      ; name loop
+    mov dl, [bx]                        ; load char
+    mov ah, 02h                         ; write char
+    int 21h                             ; system call
+    inc bx                              ; next char
+    loop print_issued_name              ; repeat 15x
     
-    pop si                             ; Restore issue index
-    mov cx, 3                          ; 3 spaces
-    call print_spaces                   ; Display
+    pop si                              ; restore slot
+    mov cx, 3                           ; load spacing
+    call print_spaces                   ; format output
     
-    ; Display user ID
-    push si                             ; save index
-    mov ax, si                         ; index
-    mov bx, 5                          ; length
-    mul bx                             ; offset
-    lea bx, issue_userid               ; Base table
-    add bx, ax                         ; Point to record
-    mov cx, 5                          ; length
-print_issue_user:
-    mov dl, [bx]                       ; Load character
-    mov ah, 02h                        ; Display
-    int 21h                            ; Call DOS
-    inc bx                             ; Next
-    loop print_issue_user               ; Repeat 5
-    pop si                             ; restore index
+    push si                             ; save slot
+    mov ax, si                          ; load index
+    mov bx, 5                           ; id size
+    mul bx                              ; get offset
+    lea bx, issue_userid                ; find table
+    add bx, ax                          ; target id
+    mov cx, 5                           ; set length
+print_issue_user:                       ; id loop
+    mov dl, [bx]                        ; load char
+    mov ah, 02h                         ; write char
+    int 21h                             ; system call
+    inc bx                              ; next char
+    loop print_issue_user               ; repeat 5x
+    pop si                              ; restore slot
     
     mov cx, 5                          ; 5 spaces
-    call print_spaces                   ; Display
+    call print_spaces                   ; format output
     
-    ; Display days remaining
-    lea bx, issue_days                 ; Base array
-    add bx, si                         ; Current slot
-    mov al, [bx]                       ; Load value
-    call show_digit                     ; Display
+    lea bx, issue_days                  ; find table
+    add bx, si                          ; current slot
+    mov al, [bx]                        ; load value
+    call show_digit                     ; display it
     
-    call print_newline                 ; line feed
+    call print_newline                  ; format output
     
-    inc si                             ; next issue
-    pop cx                             ; restore counter
-    loop view_issued_loop              ; repeat for all issues
+    inc si                              ; next issue
+    pop cx                              ; restore count
+    loop view_issued_loop               ; repeat CX
     
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
     
-no_issues:
-    lea dx, msg_nobook                 ; Load no books issued message
+no_issues:                              ; empty list
+    lea dx, msg_nobook                 ; load notice
     call print_string                   ; Display
     lea dx, msg_press_enter             ; Load prompt
     call print_string                   ; Display
@@ -1387,84 +1467,82 @@ no_issues:
     jmp admin_main                     ; Return to menu
 
 ; ADMIN: Fast Forward Days
-admin_ffwd:
-    mov cl, issue_count                ; Total active issues
-    xor ch, ch                         ; clean high byte
-    jcxz ffwd_done                     ; Skip if no issues
+admin_ffwd:                           ; skip time
+    mov cl, issue_count                ; active total
+    xor ch, ch                         ; clean high
+    jcxz ffwd_done                     ; check empty
     xor si, si                         ; reset index
-ffwd_loop:
-    lea bx, issue_days                 ; Base array
+ffwd_loop:                              ; update loop
+    lea bx, issue_days                 ; find table
     add bx, si                         ; current slot
-    cmp byte ptr [bx], 0               ; Check if already 0
-    je skip_dec                        ; Don't decrement if 0
-    dec byte ptr [bx]                  ; decrement remaining days
-skip_dec:
+    cmp byte ptr [bx], 0               ; check expired
+    je skip_dec                        ; skip zero
+    dec byte ptr [bx]                  ; reduce day
+skip_dec:                               ; next item
     inc si                             ; next issue
-    loop ffwd_loop                     ; repeat
-ffwd_done:
-    lea dx, msg_ffwd                   ; Load Success message
-    call print_string                   ; Display success
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+    loop ffwd_loop                     ; repeat CX
+ffwd_done:                              ; finishing
+    lea dx, msg_ffwd                   ; load success
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
 
 ; ADMIN: View Suggestions
-admin_view_suggest:
-    cmp suggest_count, 0               ; Any suggestions?
-    je no_suggestions                  ; branch if none
+admin_view_suggest:                     ; user feedback
+    cmp suggest_count, 0               ; check empty
+    je no_suggestions                  ; handle none
     
-    lea dx, hdr_suggest                 ; Load Header
-    call print_string                   ; Display header
-    call print_newline                  ; Newline
+    lea dx, hdr_suggest                ; load header
+    call print_string                   ; display it
+    call print_newline                  ; format output
     
-    mov cl, suggest_count               ; Total count
+    mov cl, suggest_count               ; load total
     xor ch, ch                         ; clean high
-    xor si, si                         ; index
+    xor si, si                         ; reset index
     
-view_suggest_loop:
-    push cx                             ; Save counter
+view_suggest_loop:                      ; display loop
+    push cx                             ; save count
     
-    ; Display suggestion number
-    mov ax, si                         ; index
-    inc al                             ; 1-based
-    call show_digit                     ; Display
+    mov ax, si                          ; load index
+    inc al                              ; adjust 1-based
+    call show_digit                     ; display id
     
-    mov cx, 3                          ; 3 spaces
-    call print_spaces                   ; Display
+    mov cx, 3                           ; load spacing
+    call print_spaces                   ; format output
     
-    ; Display book name
-    mov ax, si                         ; index
-    mov bx, 15                         ; Slot size
-    mul bx                             ; offset
-    lea bx, suggest_names              ; Base table
-    add bx, ax                         ; Point to record
-    mov cx, 15                         ; Length
-print_suggest_name:
-    mov dl, [bx]                       ; Load character
-    mov ah, 02h                        ; Display
-    int 21h                            ; Call DOS
-    inc bx                             ; Next
-    loop print_suggest_name             ; Repeat 15
+    mov ax, si                          ; load index
+    mov bx, 15                          ; name size
+    mul bx                              ; get offset
+    lea bx, suggest_names               ; find table
+    add bx, ax                          ; target name
+    mov cx, 15                          ; set length
+print_suggest_name:                     ; name loop
+    mov dl, [bx]                        ; load char
+    mov ah, 02h                         ; write char
+    int 21h                             ; system call
+    inc bx                              ; next char
+    loop print_suggest_name             ; repeat 15x
     
-    call print_newline                  ; Line feed
+    call print_newline                  ; format output
     
-    inc si                             ; next record
-    pop cx                             ; restore counter
-    loop view_suggest_loop              ; repeat for all
+    inc si                              ; next item
+    pop cx                              ; restore count
+    loop view_suggest_loop              ; repeat CX
     
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
     
-no_suggestions:
-    lea dx, msg_nosuggest              ; Load error message
-    call print_string                   ; Display
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+no_suggestions:                         ; empty list
+    lea dx, msg_nosuggest              ; load notice
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
 
 ; ADMIN: Approve Signups
 admin_approve_signups:
@@ -1481,92 +1559,88 @@ admin_approve_signups:
     
 
 ; Display all pending signup requests
-show_requests_loop:
-    push cx                             ; Save outer count
+show_requests_loop:                     ; display loop
+    push cx                             ; save count
     
-    ; Display request number
-    mov ax, si                         ; current index
-    inc al                             ; 1-based
-    call show_digit                     ; Display number
+    mov ax, si                          ; load index
+    inc al                              ; adjust 1-based
+    call show_digit                     ; display id
     
-    mov cx, 3                          ; 3 spaces
-    call print_spaces                   ; Display
+    mov cx, 3                           ; load spacing
+    call print_spaces                   ; format output
     
-    ; Display User ID
-    mov ax, si                         ; index
-    mov bx, 5                          ; length
-    mul bx                             ; offset
-    lea bx, request_ids                ; base table
-    add bx, ax                         ; point to record
-    push si                             ; save record index
-    mov cx, 5                          ; length
-print_req_uid:
-    mov dl, [bx]                       ; Load char
-    mov ah, 02h                        ; Display
-    int 21h                            ; Call DOS
-    inc bx                             ; next
-    loop print_req_uid                 ; repeat 5
-    pop si                             ; restore index
+    mov ax, si                          ; load index
+    mov bx, 5                           ; id size
+    mul bx                              ; get offset
+    lea bx, request_ids                 ; find table
+    add bx, ax                          ; target id
+    push si                             ; save slot
+    mov cx, 5                           ; set length
+print_req_uid:                          ; id loop
+    mov dl, [bx]                        ; load char
+    mov ah, 02h                         ; write char
+    int 21h                             ; system call
+    inc bx                              ; next char
+    loop print_req_uid                  ; repeat 5x
+    pop si                              ; restore slot
     
-    mov cx, 5                          ; 5 spaces
-    call print_spaces                   ; Display
+    mov cx, 5                           ; load spacing
+    call print_spaces                   ; format output
     
-    ; Display Email (30 characters)
-    mov ax, si                         ; index
-    mov bx, 30                         ; length
-    mul bx                             ; offset
-    lea bx, request_emails             ; base table
-    add bx, ax                         ; point to record
-    push si                             ; save index
-    mov cx, 30                         ; length
-print_req_email:
-    mov dl, [bx]                       ; Load char
-    mov ah, 02h                        ; Display
-    int 21h                            ; Call DOS
-    inc bx                             ; next
-    loop print_req_email               ; repeat 30
-    pop si                             ; restore index
+    mov ax, si                          ; load index
+    mov bx, 30                          ; email size
+    mul bx                              ; get offset
+    lea bx, request_emails              ; find table
+    add bx, ax                          ; target email
+    push si                             ; save slot
+    mov cx, 30                          ; set length
+print_req_email:                        ; email loop
+    mov dl, [bx]                        ; load char
+    mov ah, 02h                         ; write char
+    int 21h                             ; system call
+    inc bx                              ; next char
+    loop print_req_email                ; repeat 30x
+    pop si                              ; restore slot
     
-    mov cx, 5                          ; 5 spaces
-    call print_spaces                   ; Display
+    mov cx, 5                           ; load spacing
+    call print_spaces                   ; format output
     
-    ; Display Name
-    mov ax, si                         ; index
-    mov bx, 10                         ; length
-    mul bx                             ; offset
-    lea bx, request_names              ; base table
-    add bx, ax                         ; point to record
-    mov cx, 10                         ; length
-print_req_name:
-    mov dl, [bx]                       ; Load char
-    mov ah, 02h                        ; Display
-    int 21h                            ; Call DOS
-    inc bx                             ; next
-    loop print_req_name                ; repeat 10
+    mov ax, si                          ; load index
+    mov bx, 10                          ; name size
+    mul bx                              ; get offset
+    lea bx, request_names               ; find table
+    add bx, ax                          ; target name
+    mov cx, 10                          ; set length
+print_req_name:                         ; name loop
+    mov dl, [bx]                        ; load char
+    mov ah, 02h                         ; write char
+    int 21h                             ; system call
+    inc bx                              ; next char
+    loop print_req_name                 ; repeat 10x
     
-    call print_newline                  ; line feed
+    call print_newline                  ; format output
     
-    inc si                             ; next record
-    pop cx                             ; restore counter
-    loop show_requests_loop            ; repeat for all requests
+    inc si                              ; next item
+    pop cx                              ; restore count
+    loop show_requests_loop             ; repeat CX
     
     ; Get admin's selection
-    lea dx, msg_reqsel                 ; Load selection prompt
-    call print_string                   ; Display prompt
+    lea dx, msg_reqsel                 ; load prompt
+    call print_string                   ; display it
     
-    call read_char                      ; Read user input
-    call wait_for_enter                 ; Wait for confirmation
-    sub al, '0'                        ; Convert ASCII to number
+    call read_char                      ; read digit
+    call wait_for_enter                 ; wait enter
+    sub al, '0'                         ; convert decimal
     
-    cmp al, 1                          ; Minimum index 1
-    jl invalid_request                 ; Error if too low
-    mov bl, request_count               ; Get total count
-    inc bl                             ; Adjust for comparison
-    cmp al, bl                         ; Compare selection with count + 1
-    jge invalid_request                ; Error if too high
+    cmp al, 1                           ; check min
+    jl invalid_request                  ; handle low
+    mov bl, request_count               ; load limit
+    inc bl                              ; adjust limit
+    cmp al, bl                          ; check max
+    jge invalid_request                 ; handle high
     
-    dec al                             ; Convert back to 0-based index
-    mov temp_idx, al                   ; Store selected index
+    dec al                              ; adjust index
+    mov temp_idx, al                    ; save selection
 
     ; Ask admin to approve or reject
     lea dx, msg_approve_reject        ; Load Action prompt (A/R)
@@ -1586,85 +1660,79 @@ print_req_name:
     
     jmp invalid_request                ; Handle unknown action
 
-; Approve user - Add to student database
-approve_user:
-    ; Check if student database is full
-    mov al, student_count               ; current total students
-    cmp al, MAX_STUDENTS               ; compare with limit
-    jge student_db_full                ; handle overflow
+approve_user:                           ; process approval
+    mov al, student_count               ; load count
+    cmp al, MAX_STUDENTS               ; check limit
+    jge student_db_full                ; handle full
     
-    ; Copy User ID to student database
-    mov al, student_count               ; get new student index
-    xor ah, ah                         ; clear AH
-    mov bx, 5                          ; ID length
-    mul bx                             ; calculate offset
-    push ax                             ; save destination offset
+    mov al, student_count               ; load index
+    xor ah, ah                         ; clean high
+    mov bx, 5                          ; id size
+    mul bx                             ; get offset
+    push ax                             ; save dest
     
-    mov al, temp_idx                    ; get request index
-    xor ah, ah                         ; clear AH
-    mov bx, 5                          ; ID length
-    mul bx                             ; calculate offset
-    lea si, request_ids                ; source base
-    add si, ax                         ; source address
+    mov al, temp_idx                    ; load selection
+    xor ah, ah                         ; clean high
+    mov bx, 5                          ; id size
+    mul bx                             ; get offset
+    lea si, request_ids                ; source table
+    add si, ax                         ; source item
     
-    pop ax                             ; restore destination offset
-    lea di, student_ids                 ; destination base
-    add di, ax                         ; destination address
-    mov cx, 5                          ; bytes to copy
-    rep movsb                          ; copy ID
+    pop ax                             ; restore dest
+    lea di, student_ids                 ; dest table
+    add di, ax                         ; dest item
+    mov cx, 5                          ; set length
+    rep movsb                          ; copy id
     
-    ; Copy encrypted password to student database
-    mov al, student_count               ; dest index
-    xor ah, ah                         ; clear AH
-    mov bx, 5                          ; length
-    mul bx                             ; offset
-    push ax                             ; save offset
+    mov al, student_count               ; load index
+    xor ah, ah                         ; clean high
+    mov bx, 5                          ; id size
+    mul bx                             ; get offset
+    push ax                             ; save dest
     
-    mov al, temp_idx                    ; source index
-    xor ah, ah                         ; clear AH
-    mov bx, 5                          ; length
-    mul bx                             ; offset
-    lea si, request_pwds               ; source table
-    add si, ax                         ; source address
+    mov al, temp_idx                    ; load selection
+    xor ah, ah                         ; clean high
+    mov bx, 5                          ; id size
+    mul bx                             ; get offset
+    lea si, request_pwds                ; source table
+    add si, ax                         ; source item
     
-    pop ax                             ; restore offset
+    pop ax                             ; restore dest
     lea di, student_pwds                ; dest table
-    add di, ax                         ; dest address
-    mov cx, 5                          ; copy 5 bytes
-    rep movsb                          ; copy password
+    add di, ax                         ; dest item
+    mov cx, 5                          ; set length
+    rep movsb                          ; copy pass
     
-    ; Copy Email to student database (30 characters)
-    mov al, student_count               ; dest index
-    xor ah, ah                         ; clear AH
-    mov bx, 30                         ; length
-    mul bx                             ; offset
-    push ax                             ; save offset
+    mov al, student_count               ; load index
+    xor ah, ah                         ; clean high
+    mov bx, 30                         ; email size
+    mul bx                             ; get offset
+    push ax                             ; save dest
     
-    mov al, temp_idx                    ; source index
-    xor ah, ah                         ; clear AH
-    mov bx, 30                         ; length
-    mul bx                             ; offset
-    lea si, request_emails             ; source table
-    add si, ax                         ; source address
+    mov al, temp_idx                    ; load selection
+    xor ah, ah                         ; clean high
+    mov bx, 30                         ; email size
+    mul bx                             ; get offset
+    lea si, request_emails              ; source table
+    add si, ax                         ; source item
     
-    pop ax                             ; restore offset
+    pop ax                             ; restore dest
     lea di, student_emails              ; dest table
-    add di, ax                         ; dest address
-    mov cx, 30                         ; copy 30 bytes
+    add di, ax                         ; dest item
+    mov cx, 30                         ; set length
     rep movsb                          ; copy email
     
-    ; Copy Name to student database
-    mov al, student_count               ; dest index
-    xor ah, ah                         ; clear AH
-    mov bx, 10                         ; length
-    mul bx                             ; offset
-    push ax                             ; save offset
+    mov al, student_count               ; load index
+    xor ah, ah                         ; clean high
+    mov bx, 10                         ; name size
+    mul bx                             ; get offset
+    push ax                             ; save dest
     
-    mov al, temp_idx                    ; source index
-    xor ah, ah                         ; clear AH
-    mov bx, 10                         ; length
-    mul bx                             ; offset
-    lea si, request_names              ; source table
+    mov al, temp_idx                    ; load selection
+    xor ah, ah                         ; clean high
+    mov bx, 10                         ; name size
+    mul bx                             ; get offset
+    lea si, request_names               ; source table
     add si, ax                         ; source address
     
     pop ax                             ; restore offset
@@ -1673,77 +1741,74 @@ approve_user:
     mov cx, 10                         ; copy 10 bytes
     rep movsb                          ; copy name
     
-    ; Set status to active
-    xor bh, bh                         ; clear BX
-    mov bl, student_count               ; current student index
-    lea si, student_status             ; status table
-    add si, bx                         ; target slot
-    mov byte ptr [si], 1               ; Set status to Active (1)
+    xor bh, bh                          ; clean high
+    mov bl, student_count               ; load count
+    lea si, student_status              ; find table
+    add si, bx                          ; target status
+    mov byte ptr [si], 1                ; set active
     
-    inc student_count                  ; Increment registered students
+    inc student_count                   ; add student
     
-    ; Remove from request queue
-    call remove_request                 ; Shift queue left
+    call remove_request                 ; clear queue
     
-    lea dx, msg_approved               ; Load Success message
-    call print_string                   ; Display success
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+    lea dx, msg_approved               ; load success
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
     
 ; Reject user - Remove from request queue
-reject_user:
-    call remove_request                 ; Simply remove from queue
-    lea dx, msg_rejected               ; Load Rejection message
-    call print_string                   ; Display message
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+reject_user:                            ; deny request
+    call remove_request                 ; drop item
+    lea dx, msg_rejected               ; load notice
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
     
-invalid_request:
-    lea dx, msg_invalid                ; Load Invalid Selection message
-    call print_string                   ; Display error
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+invalid_request:                        ; bad choice
+    lea dx, msg_invalid                ; load error
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
     
-no_requests:
-    lea dx, msg_noreq                  ; Load No Requests message
-    call print_string                   ; Display message
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+no_requests:                            ; empty queue
+    lea dx, msg_noreq                  ; load notice
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
     
-student_db_full:
-    lea dx, msg_full                   ; Load Database Full message
-    call print_string                   ; Display error
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display prompt
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+student_db_full:                        ; table full
+    lea dx, msg_full                   ; load error
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
 
 
 ; ADMIN: View All Students
 
 
-admin_view_students:
-    cmp student_count, 0
-    je no_students
+admin_view_students:                    ; user list
+    cmp student_count, 0               ; check empty
+    je no_students                     ; handle none
     
-    lea dx, hdr_students
-    lea dx, hdr_students               ; Load Header
-    call print_string                   ; Display header
-    call print_newline                  ; Newline
+    lea dx, hdr_students               ; load header
+    call print_string                   ; display it
+    call print_newline                  ; format output
     
-    mov cl, student_count               ; Total student count
-    xor ch, ch                         ; clean high byte
-    xor si, si                         ; index (0-based)
+    mov cl, student_count               ; load total
+    xor ch, ch                         ; clean high
+    xor si, si                         ; reset index
     
-view_students_loop:
+view_students_loop:                     ; display loop
     push cx                             ; Save counter
     
     ; Display student number
@@ -1758,196 +1823,187 @@ view_students_loop:
     mov ax, si                         ; index
     mov bx, 5                          ; slot size
     mul bx                             ; offset
-    lea bx, student_ids                ; base table
-    add bx, ax                         ; point to record
-    push si                             ; save index
-    mov cx, 5                          ; length
-print_student_uid:
-    mov dl, [bx]                       ; Load char
-    mov ah, 02h                        ; Display
-    int 21h                            ; Call DOS
-    inc bx                             ; next
-    loop print_student_uid              ; repeat 5
-    pop si                             ; restore index
+    lea bx, student_ids                 ; find table
+    add bx, ax                          ; target id
+    push si                             ; save slot
+    mov cx, 5                           ; set length
+print_student_uid:                      ; id loop
+    mov dl, [bx]                        ; load char
+    mov ah, 02h                         ; write char
+    int 21h                             ; system call
+    inc bx                              ; next char
+    loop print_student_uid              ; repeat 5x
+    pop si                              ; restore slot
     
-    mov cx, 5                          ; 5 spaces
-    call print_spaces                   ; Display
+    mov cx, 5                           ; load spacing
+    call print_spaces                   ; format output
     
-    ; Display Email (30 characters)
-    mov ax, si                         ; index
-    mov bx, 30                         ; slot size
-    mul bx                             ; offset
-    lea bx, student_emails             ; base table
-    add bx, ax                         ; point to record
-    push si                             ; save index
-    mov cx, 30                         ; length
-print_student_email:
-    mov dl, [bx]                       ; Load char
-    mov ah, 02h                        ; Display
-    int 21h                            ; Call DOS
-    inc bx                             ; next
-    loop print_student_email            ; repeat 30
-    pop si                             ; restore index
+    mov ax, si                          ; load index
+    mov bx, 30                          ; email size
+    mul bx                              ; get offset
+    lea bx, student_emails              ; find table
+    add bx, ax                          ; target email
+    push si                             ; save slot
+    mov cx, 30                          ; set length
+print_student_email:                    ; email loop
+    mov dl, [bx]                        ; load char
+    mov ah, 02h                         ; write char
+    int 21h                             ; system call
+    inc bx                              ; next char
+    loop print_student_email            ; repeat 30x
+    pop si                              ; restore slot
     
-    mov cx, 5                          ; 5 spaces
-    call print_spaces                   ; Display
+    mov cx, 5                           ; load spacing
+    call print_spaces                   ; format output
     
-    ; Display Name
-    mov ax, si                         ; index
-    mov bx, 10                         ; slot size
-    mul bx                             ; offset
-    lea bx, student_names              ; base table
-    add bx, ax                         ; point to record
-    push si                             ; save index
-    mov cx, 10                         ; length
-print_student_name:
-    mov dl, [bx]                       ; Load char
-    mov ah, 02h                        ; Display
-    int 21h                            ; Call DOS
-    inc bx                             ; next
-    loop print_student_name             ; repeat 10
-    pop si                             ; restore index
+    mov ax, si                          ; load index
+    mov bx, 10                          ; name size
+    mul bx                              ; get offset
+    lea bx, student_names               ; find table
+    add bx, ax                          ; target name
+    push si                             ; save slot
+    mov cx, 10                          ; set length
+print_student_name:                     ; name loop
+    mov dl, [bx]                        ; load char
+    mov ah, 02h                         ; write char
+    int 21h                             ; system call
+    inc bx                              ; next char
+    loop print_student_name             ; repeat 10x
+    pop si                              ; restore slot
     
-    mov cx, 5                          ; 5 spaces
-    call print_spaces                   ; Display
+    mov cx, 5                           ; load spacing
+    call print_spaces                   ; format output
     
-    ; Display Status
-    lea bx, student_status             ; status table
-    add bx, si                         ; target slot
-    cmp byte ptr [bx], 1               ; Active?
-    je print_active_list
+    lea bx, student_status              ; find table
+    add bx, si                          ; current slot
+    cmp byte ptr [bx], 1                ; check active
+    je print_active_list                ; branch active
     
-    ; Print "Inactive" manually
-    mov dl, 'I'
-    mov ah, 02h
-    int 21h
-    mov dl, 'n'
-    int 21h
-    mov dl, 'a'
-    int 21h
-    mov dl, 'c'
-    int 21h
-    mov dl, 't'
-    int 21h
-    mov dl, 'i'
-    int 21h
-    mov dl, 'v'
-    int 21h
-    mov dl, 'e'
-    int 21h
-    jmp next_student_view_list
+    mov dl, 'I'                         ; load char
+    mov ah, 02h                         ; write char
+    int 21h                             ; system call
+    mov dl, 'n'                         ; load char
+    int 21h                             ; system call
+    mov dl, 'a'                         ; load char
+    int 21h                             ; system call
+    mov dl, 'c'                         ; load char
+    int 21h                             ; system call
+    mov dl, 't'                         ; load char
+    int 21h                             ; system call
+    mov dl, 'i'                         ; load char
+    int 21h                             ; system call
+    mov dl, 'v'                         ; load char
+    int 21h                             ; system call
+    mov dl, 'e'                         ; load char
+    int 21h                             ; system call
+    jmp next_student_view_list                   ; done inactive_view_list
     
-print_active_list:
-    ; Print "Active" manually
-    mov dl, 'A'
-    mov ah, 02h
-    int 21h
-    mov dl, 'c'
-    int 21h
-    mov dl, 't'
-    int 21h
-    mov dl, 'i'
-    int 21h
-    mov dl, 'v'
-    int 21h
-    mov dl, 'e'
-    int 21h
-    mov cx, 2                          ; alignment
-    call print_spaces                   ; display
+print_active_list:                      ; active logic
+    mov dl, 'A'                         ; load char
+    mov ah, 02h                         ; write char
+    int 21h                             ; system call
+    mov dl, 'c'                         ; load char
+    int 21h                             ; system call
+    mov dl, 't'                         ; load char
+    int 21h                             ; system call
+    mov dl, 'i'                         ; load char
+    int 21h                             ; system call
+    mov dl, 'v'                         ; load char
+    int 21h                             ; system call
+    mov dl, 'e'                         ; load char
+    int 21h                             ; system call
+    mov cx, 2                           ; load padding
+    call print_spaces                   ; format output
     
-next_student_view_list:
-    call print_newline                  ; line feed
+next_student_view_list:                 ; loop bottom
+    call print_newline                  ; format output
     
-    inc si                             ; next record
-    pop cx                             ; restore counter
-    loop view_students_loop            ; repeat for all records
+    inc si                              ; next item
+    pop cx                              ; restore count
+    loop view_students_loop             ; repeat CX
     
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
     
-no_students:
-    lea dx, msg_nostud                 ; Load No Students registered message
-    call print_string                   ; Display
-    lea dx, msg_press_enter             ; Load prompt
-    call print_string                   ; Display
-    call wait_for_enter                 ; Wait
-    jmp admin_main                     ; Return to menu
+no_students:                            ; empty list
+    lea dx, msg_nostud                 ; load notice
+    call print_string                   ; display it
+    lea dx, msg_press_enter            ; load prompt
+    call print_string                   ; display it
+    call wait_for_enter                 ; wait enter
+    jmp admin_main                      ; back to menu
 
 ; STUDENT MENU
-student_main:
-    lea dx, student_menu               ; Load student menu options
-    call print_string                   ; Display menu
+student_main:                           ; student menu
+    lea dx, student_menu               ; load menu
+    call print_string                   ; display it
     
-    call read_char                      ; Read user selection
-    call wait_for_enter                 ; Wait for confirmation
-    sub al, '0'                        ; Convert ASCII to number
+    call read_char                      ; read choice
+    call wait_for_enter                 ; wait enter
+    sub al, '0'                         ; convert decimal
     
-    cmp al, 1                          ; Option 1: View Books
-    je student_view_books
-    cmp al, 2                          ; Option 2: Issue Book
-    je student_issue
-    cmp al, 3                          ; Option 3: Return Book
-    je student_return
-    cmp al, 4                          ; Option 4: My Issued Books
-    je student_my_books
-    cmp al, 5                          ; Option 5: Suggest New Book
-    je student_suggest
-    cmp al, 6                          ; Option 6: Logout
-    je logout
+    cmp al, 1                           ; check view
+    je student_view_books               ; branch view
+    cmp al, 2                           ; check issue
+    je student_issue                    ; branch issue
+    cmp al, 3                           ; check return
+    je student_return                   ; branch return
+    cmp al, 4                           ; check history
+    je student_my_books                 ; branch history
+    cmp al, 5                           ; check suggest
+    je student_suggest                  ; branch suggest
+    cmp al, 6                           ; check logout
+    je logout                           ; branch logout
     
-    jmp student_main                   ; Repeat if invalid
+    jmp student_main                    ; loop menu
 
 ; STUDENT: View Available Books
-student_view_books:
-    lea dx, hdr_books                  ; Load Header
-    call print_string                   ; Display header
-    call print_newline                  ; Newline
+student_view_books:                     ; view library
+    lea dx, hdr_books                  ; load header
+    call print_string                   ; display it
+    call print_newline                  ; format output
     
-    mov cl, book_count                 ; Total book database size
-    xor ch, ch                         ; clean high byte
-    xor si, si                         ; index
+    mov cl, book_count                  ; load total
+    xor ch, ch                         ; clean high
+    xor si, si                         ; reset index
     
-student_view_loop:
-    push cx                             ; Save counter
+student_view_loop:                      ; display loop
+    push cx                             ; save count
     
-    ; Only show books with stock > 0
-    lea bx, book_stock                 ; Stock levels table
-    add bx, si                         ; point to current book's stock
-    cmp byte ptr [bx], 0               ; Out of stock?
-    je skip_book_view                  ; skip if empty
+    lea bx, book_stock                  ; find table
+    add bx, si                          ; current stock
+    cmp byte ptr [bx], 0                ; check empty
+    je skip_book_view                   ; skip zero
     
-    ; Display book number
-    mov ax, si                         ; index
-    inc al                             ; 1-based
-    call show_digit                     ; display number
+    mov ax, si                          ; load index
+    inc al                              ; adjust 1-based
+    call show_digit                     ; display id
     
-    mov cx, 3                          ; 3 spaces
-    call print_spaces                   ; display
+    mov cx, 3                           ; load spacing
+    call print_spaces                   ; format output
     
-    ; Display book name
-    mov ax, si                         ; index
-    mov bx, 15                         ; name slot size
-    mul bx                             ; offset
-    lea bx, book_names                 ; table base
-    add bx, ax                         ; record address
-    mov cx, 15                         ; length
-print_avail_book_name:
-    mov dl, [bx]                       ; load char
-    mov ah, 02h                        ; display
-    int 21h                            ; call DOS
-    inc bx                             ; next
-    loop print_avail_book_name          ; repeat 15
+    mov ax, si                          ; load index
+    mov bx, 15                          ; name size
+    mul bx                              ; get offset
+    lea bx, book_names                  ; find table
+    add bx, ax                          ; target name
+    mov cx, 15                          ; set length
+print_avail_book_name:                  ; name loop
+    mov dl, [bx]                        ; load char
+    mov ah, 02h                         ; write char
+    int 21h                             ; system call
+    inc bx                              ; next char
+    loop print_avail_book_name          ; repeat 15x
     
-    mov cx, 3                          ; 3 spaces
-    call print_spaces                   ; display
+    mov cx, 3                           ; load spacing
+    call print_spaces                   ; format output
     
-    ; Display stock
-    lea bx, book_stock                 ; stock levels
-    add bx, si                         ; current book
-    mov al, [bx]                       ; load stock
-    call show_digit                     ; display
+    lea bx, book_stock                  ; find table
+    add bx, si                          ; current stock
+    mov al, [bx]                        ; load value
+    call show_digit                     ; display it
     
     call print_newline                  ; line feed
     
@@ -2030,6 +2086,8 @@ student_issue:
     mov byte ptr [bx], 7               ; Initial deadline: 7 days
     
     inc issue_count                    ; Increment active issues
+    
+    call log_transaction               ; Log the issue to LOG.CSV for Excel
     
     lea dx, msg_issued                 ; Load Success message
     call print_string                   ; Display
@@ -2519,16 +2577,21 @@ check_uid_loop:
     jcxz uid_not_exists                ; Exit if none
     
     ; Compare user IDs
+    push si                             ; SAVE LOOP INDEX BEFORE OVERWRITE
+    
     mov ax, si                         ; index
     mov bx, 5                          ; size
     mul bx                             ; offset
     lea di, student_ids                 ; student ID table
     add di, ax                         ; record address
-    lea si, uid_in                      ; target ID
+    
+    lea si, uid_in                      ; target ID (Overwrites SI)
     push cx                             ; save counter
     mov cx, 5                          ; size
     repe cmpsb                         ; compare
-    pop cx                             ; restore
+    pop cx                             ; restore counter
+    
+    pop si                             ; RESTORE LOOP INDEX
     
     je uid_exists                      ; branch if found
     
@@ -2564,17 +2627,22 @@ check_uid_in_requests proc
 check_req_loop:
     jcxz req_not_exists                ; Exit if none
     
+    push si                             ; SAVE LOOP INDEX
+    
     ; Compare user IDs
     mov ax, si                         ; index
     mov bx, 5                          ; size
     mul bx                             ; offset
     lea di, request_ids                ; request ID table
     add di, ax                         ; record address
-    lea si, uid_in                      ; target ID
+    
+    lea si, uid_in                      ; target ID (Overwrites SI)
     push cx                             ; save counter
     mov cx, 5                          ; size
     repe cmpsb                         ; compare
     pop cx                             ; restore
+    
+    pop si                             ; RESTORE LOOP INDEX
     
     je req_exists                      ; branch if found
     
